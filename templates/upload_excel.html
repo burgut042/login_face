@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Import - Shaxslarni yuklash</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #333;
+        }
+
+        .back-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: background 0.3s;
+        }
+
+        .back-btn:hover {
+            background: #5568d3;
+        }
+
+        .upload-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .info-box {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+        }
+
+        .info-box h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        .info-box ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .info-box li {
+            padding: 8px 0;
+            color: #555;
+            font-size: 14px;
+        }
+
+        .info-box li::before {
+            content: "✓ ";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .upload-zone {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+            margin-bottom: 20px;
+        }
+
+        .upload-zone:hover {
+            background: #f0f4ff;
+            border-color: #5568d3;
+        }
+
+        .upload-zone.dragover {
+            background: #e8edff;
+            border-color: #5568d3;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .upload-zone h3 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 20px;
+        }
+
+        .upload-zone p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-info {
+            background: #f0f4ff;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .file-info.show {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .file-name {
+            color: #333;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .remove-file {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+
+        .remove-file:hover {
+            background: #c0392b;
+        }
+
+        .upload-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result-box {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .result-box.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            display: block;
+        }
+
+        .result-box.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            display: block;
+        }
+
+        .result-box h4 {
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .result-box ul {
+            margin-left: 20px;
+            font-size: 14px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Excel Import</h1>
+            <a href="/dashboard/" class="back-btn">← Dashboard</a>
+        </div>
+
+        <div class="upload-card">
+            <div class="info-box">
+                <h3>Excel fayl talablari:</h3>
+                <ul>
+                    <li><strong>ISM</strong> - Shaxsning ismi</li>
+                    <li><strong>FAMILIYA</strong> - Shaxsning familiyasi</li>
+                    <li><strong>SHARIF</strong> - Otasining ismi (ixtiyoriy)</li>
+                    <li><strong>PASSPORT</strong> - Passport seriyasi (masalan: AB1234567)</li>
+                    <li><strong>TUG'ILGAN KUN</strong> - Tug'ilgan kun (masalan: 1990-01-15)</li>
+                    <li><strong>PINFL</strong> - 14 raqamli PINFL kod (ixtiyoriy)</li>
+                    <li><strong>LAVOZIM</strong> - Lavozim (ixtiyoriy)</li>
+                    <li><strong>TUMAN</strong> - Biriktirilgan tuman (ixtiyoriy)</li>
+                    <li><strong>BO'LIM</strong> - Bo'lim (ixtiyoriy)</li>
+                    <li><strong>TELEFON</strong> - Telefon raqami (ixtiyoriy)</li>
+                </ul>
+            </div>
+
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">📁</div>
+                <h3>Excel faylni tanlang</h3>
+                <p>Yoki bu yerga sudrab tashlang</p>
+            </div>
+
+            <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFileSelect(event)">
+
+            <div class="file-info" id="fileInfo">
+                <span class="file-name" id="fileName"></span>
+                <button class="remove-file" onclick="removeFile()">O'chirish</button>
+            </div>
+
+            <button class="upload-btn" id="uploadBtn" onclick="uploadFile()" disabled>
+                Yuklash
+            </button>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Excel fayl yuklanmoqda...</p>
+            </div>
+
+            <div class="result-box" id="resultBox"></div>
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const loading = document.getElementById('loading');
+        const resultBox = document.getElementById('resultBox');
+
+        // Drag and drop
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+                    selectedFile = file;
+                    showFileInfo(file.name);
+                } else {
+                    alert('Faqat Excel fayllar (.xlsx, .xls) yuklash mumkin!');
+                }
+            }
+        });
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                showFileInfo(file.name);
+            }
+        }
+
+        function showFileInfo(name) {
+            fileName.textContent = name;
+            fileInfo.classList.add('show');
+            uploadBtn.disabled = false;
+            resultBox.style.display = 'none';
+        }
+
+        function removeFile() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileInfo.classList.remove('show');
+            uploadBtn.disabled = true;
+            resultBox.style.display = 'none';
+        }
+
+        async function uploadFile() {
+            if (!selectedFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            loading.classList.add('show');
+            uploadBtn.disabled = true;
+            resultBox.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/upload-excel/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                loading.classList.remove('show');
+
+                if (data.success) {
+                    resultBox.className = 'result-box success';
+                    resultBox.innerHTML = `
+                        <h4>✅ Yuklash muvaffaqiyatli!</h4>
+                        <p>Jami: ${data.total_count} ta yozuv</p>
+                        <p>Muvaffaqiyatli: ${data.success_count} ta</p>
+                        ${data.error_count > 0 ? `<p>Xatolik: ${data.error_count} ta</p>` : ''}
+                        ${data.errors && data.errors.length > 0 ? `
+                            <h5 style="margin-top: 15px;">Xatoliklar:</h5>
+                            <ul>
+                                ${data.errors.map(err => `<li>${err}</li>`).join('')}
+                            </ul>
+                        ` : ''}
+                    `;
+
+                    // Clear file after successful upload
+                    setTimeout(() => {
+                        removeFile();
+                    }, 3000);
+                } else {
+                    resultBox.className = 'result-box error';
+                    resultBox.innerHTML = `
+                        <h4>❌ Xatolik yuz berdi!</h4>
+                        <p>${data.message || 'Noma\'lum xatolik'}</p>
+                        ${data.errors && data.errors.length > 0 ? `
+                            <ul>
+                                ${data.errors.map(err => `<li>${err}</li>`).join('')}
+                            </ul>
+                        ` : ''}
+                    `;
+                }
+            } catch (error) {
+                loading.classList.remove('show');
+                resultBox.className = 'result-box error';
+                resultBox.innerHTML = `
+                    <h4>❌ Xatolik yuz berdi!</h4>
+                    <p>${error.message}</p>
+                `;
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,543 @@
+================================================================================
+                    CHILONZOR BAZA - API DOCUMENTATION
+================================================================================
+
+📅 Yaratilgan sana: 2025-12-18
+🏢 Loyiha: Chilonzor PI Login System
+🔧 Texnologiya: Django + Face Recognition + PostgreSQL
+
+================================================================================
+                        1. LOGIN API'LARI
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.1 YUZ ORQALI LOGIN (FACE RECOGNITION)                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: POST /api/face-login/
+Method: POST
+Content-Type: application/json
+
+Request Body:
+{
+    "image": "data:image/jpeg;base64,/9j/4AAQSkZJRg..." (base64 encoded image)
+}
+
+Response (Success):
+{
+    "success": true,
+    "message": "Xamdamov Avzal tizimga kirdi",
+    "person": {
+        "id": 126,
+        "full_name": "Xamdamov Avzal Mavzurovich",
+        "passport_series": "AD",
+        "passport_number": "3145734",
+        "position": "mayor"
+    },
+    "confidence": 95.5,
+    "login_id": 45
+}
+
+Response (Error - Yuz topilmadi):
+{
+    "success": false,
+    "error": "Rasmda yuz topilmadi"
+}
+
+Response (Error - Tanilmadi):
+{
+    "success": false,
+    "error": "Yuz tanilmadi. Iltimos, qaytadan urinib ko'ring yoki passport orqali kiring."
+}
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.2 PASSPORT ORQALI LOGIN                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: POST /api/passport-login/
+Method: POST
+Content-Type: application/json
+
+Request Body:
+{
+    "username": "AD3145734",           // passport_series + passport_number
+    "birth_date": "1988-02-29",        // YYYY-MM-DD yoki DD.MM.YYYY yoki DD/MM/YYYY
+    "image": "data:image/jpeg;..."     // Optional - agar rasm yubormoqchi bo'lsangiz
+}
+
+Response (Success):
+{
+    "success": true,
+    "message": "Xamdamov Avzal Mavzurovich tizimga kirdi",
+    "user": {
+        "id": 126,
+        "username": "AD3145734",
+        "full_name": "Xamdamov Avzal Mavzurovich"
+    }
+}
+
+Response (Error):
+{
+    "success": false,
+    "error": "Passport yoki tug'ilgan sana noto'g'ri"
+}
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1.3 LOGOUT                                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: POST /api/logout/
+Method: POST
+Content-Type: application/json
+
+Response:
+{
+    "success": true,
+    "message": "Tizimdan chiqdingiz"
+}
+
+
+================================================================================
+                        2. USER MA'LUMOTLARI API'LARI
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2.1 JORIY FOYDALANUVCHI MA'LUMOTLARI                                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: GET /api/current-user/
+Method: GET
+
+Response:
+{
+    "success": true,
+    "user": {
+        "id": 126,
+        "username": "AD3145734",
+        "full_name": "Xamdamov Avzal Mavzurovich",
+        "is_staff": true,
+        "is_superuser": true,
+        "photo_url": "/media/faces/person_126_20251218_152521.jpg"
+    }
+}
+
+
+================================================================================
+                        3. STATISTIKA API'LARI
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.1 UMUMIY STATISTIKA                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: GET /api/statistics/
+Method: GET
+
+Response:
+{
+    "success": true,
+    "stats": {
+        "total_persons": 133,
+        "total_logins": 245,
+        "today_logins": 15,
+        "this_week_logins": 89,
+        "this_month_logins": 245,
+        "face_logins": 180,
+        "passport_logins": 65,
+        "face_login_percentage": 73.5,
+        "passport_login_percentage": 26.5
+    }
+}
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.2 SHAXS STATISTIKASI                                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: GET /api/person-statistics/{person_id}/
+Method: GET
+
+Example: GET /api/person-statistics/126/
+
+Response:
+{
+    "success": true,
+    "person": {
+        "id": 126,
+        "full_name": "Xamdamov Avzal Mavzurovich",
+        "passport": "AD3145734",
+        "position": "mayor",
+        "department": "1-IIB"
+    },
+    "stats": {
+        "total_logins": 15,
+        "face_logins": 12,
+        "passport_logins": 3,
+        "last_login": "2025-12-18T10:30:45",
+        "first_login": "2025-12-01T08:15:22"
+    }
+}
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3.3 LOGIN LOGLAR RO'YXATI                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: GET /api/login-logs/
+Method: GET
+
+Query Parameters:
+- person_id (optional): Shaxs ID bo'yicha filter
+- method (optional): "face" yoki "passport"
+- limit (optional): Nechta log qaytarish (default: 50)
+
+Example: GET /api/login-logs/?person_id=126&method=face&limit=10
+
+Response:
+{
+    "success": true,
+    "count": 10,
+    "logs": [
+        {
+            "id": 245,
+            "person": {
+                "id": 126,
+                "full_name": "Xamdamov Avzal Mavzurovich"
+            },
+            "login_method": "face",
+            "login_time": "2025-12-18T10:30:45",
+            "confidence": 95.5,
+            "ip_address": "127.0.0.1",
+            "success": true
+        },
+        ...
+    ]
+}
+
+
+================================================================================
+                        4. YORDAMCHI API'LAR
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4.1 YUZ ANIQLASH (FACE DETECTION)                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Endpoint: POST /api/detect-face/
+Method: POST
+Content-Type: application/json
+
+Request Body:
+{
+    "image": "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
+}
+
+Response (Yuz topildi):
+{
+    "success": true,
+    "face_detected": true,
+    "message": "Yuz topildi",
+    "face_count": 1
+}
+
+Response (Yuz topilmadi):
+{
+    "success": true,
+    "face_detected": false,
+    "message": "Rasmda yuz topilmadi",
+    "face_count": 0
+}
+
+
+================================================================================
+                        5. SAHIFALAR (WEB PAGES)
+================================================================================
+
+/ (root)                    - Login sahifasi (Face + Passport login)
+/dashboard/                 - Dashboard (login qilganlardan keyin)
+/upload-excel/              - Excel yuklash sahifasi
+/admin/                     - Django Admin panel
+
+
+================================================================================
+                        6. XAVFSIZLIK
+================================================================================
+
+✅ CSRF Protection: @csrf_exempt dekorator ishlatilgan API'larda
+✅ Authentication: Session-based authentication
+✅ Password Hashing: Django'ning standart password hasher'i
+✅ Face Recognition: 60% confidence threshold
+
+
+================================================================================
+                        7. XATOLARNI BOSHQARISH
+================================================================================
+
+Barcha API'lar quyidagi formatda xatoliklarni qaytaradi:
+
+{
+    "success": false,
+    "error": "Xatolik xabari"
+}
+
+HTTP Status Codes:
+- 200: Success
+- 400: Bad Request (noto'g'ri ma'lumotlar)
+- 401: Unauthorized (login qilmagan)
+- 404: Not Found (topilmadi)
+- 405: Method Not Allowed (noto'g'ri HTTP method)
+- 500: Server Error (server xatosi)
+
+
+================================================================================
+                        8. LOGIN OQIMI (FLOW)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Face Recognition Login Flow:                                            │
+│                                                                          │
+│  1. Frontend → POST /api/detect-face/ (rasm yuborish)                  │
+│  2. Backend → Yuz borligini tekshirish                                 │
+│  3. Frontend → POST /api/face-login/ (login uchun)                     │
+│  4. Backend → Face recognition, Person topish                          │
+│  5. Backend → Django User yaratish/login qilish                        │
+│  6. Backend → LoginLog yaratish                                        │
+│  7. Frontend → Dashboard'ga o'tish                                     │
+│  8. Frontend → GET /api/current-user/ (user ma'lumotlarini olish)     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ Passport Login Flow:                                                    │
+│                                                                          │
+│  1. Frontend → Form (username + birth_date)                            │
+│  2. Frontend → POST /api/passport-login/                               │
+│  3. Backend → Person topish (passport + birth_date)                    │
+│  4. Backend → Django User yaratish/login qilish                        │
+│  5. Backend → LoginLog yaratish                                        │
+│  6. Frontend → Dashboard'ga o'tish                                     │
+│  7. Frontend → GET /api/current-user/ (user ma'lumotlarini olish)     │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+                        9. MISOL KOD (JavaScript)
+================================================================================
+
+// Face Login
+async function faceLogin(imageBase64) {
+    const response = await fetch('/api/face-login/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            image: imageBase64
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+        console.log('Login muvaffaqiyatli:', data.person.full_name);
+        window.location.href = '/dashboard/';
+    } else {
+        console.error('Login xatosi:', data.error);
+    }
+}
+
+// Passport Login
+async function passportLogin(username, birthDate) {
+    const response = await fetch('/api/passport-login/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            username: username,
+            birth_date: birthDate
+        })
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+        console.log('Login muvaffaqiyatli:', data.user.full_name);
+        window.location.href = '/dashboard/';
+    } else {
+        console.error('Login xatosi:', data.error);
+    }
+}
+
+// Get Current User
+async function getCurrentUser() {
+    const response = await fetch('/api/current-user/');
+    const data = await response.json();
+
+    if (data.success) {
+        console.log('User:', data.user);
+        return data.user;
+    }
+    return null;
+}
+
+// Logout
+async function logout() {
+    const response = await fetch('/api/logout/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    });
+
+    const data = await response.json();
+
+    if (data.success) {
+        window.location.href = '/';
+    }
+}
+
+
+================================================================================
+                        10. POSTMAN COLLECTION
+================================================================================
+
+Import qilish uchun (Postman'da):
+1. Postman ochish
+2. Import → Raw text
+3. Quyidagi JSON'ni paste qilish:
+
+{
+    "info": {
+        "name": "Chilonzor Login API",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Face Login",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"image\": \"data:image/jpeg;base64,...\"\n}",
+                    "options": {
+                        "raw": {
+                            "language": "json"
+                        }
+                    }
+                },
+                "url": {
+                    "raw": "http://localhost:8000/api/face-login/",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "face-login"]
+                }
+            }
+        },
+        {
+            "name": "Passport Login",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n    \"username\": \"AD3145734\",\n    \"birth_date\": \"1988-02-29\"\n}",
+                    "options": {
+                        "raw": {
+                            "language": "json"
+                        }
+                    }
+                },
+                "url": {
+                    "raw": "http://localhost:8000/api/passport-login/",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "passport-login"]
+                }
+            }
+        },
+        {
+            "name": "Get Current User",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:8000/api/current-user/",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "current-user"]
+                }
+            }
+        },
+        {
+            "name": "Logout",
+            "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                    "raw": "http://localhost:8000/api/logout/",
+                    "protocol": "http",
+                    "host": ["localhost"],
+                    "port": "8000",
+                    "path": ["api", "logout"]
+                }
+            }
+        }
+    ]
+}
+
+
+================================================================================
+                        11. MUAMMOLAR VA YECHIMLAR
+================================================================================
+
+Muammo: "Yuz topilmadi"
+Yechim:
+- Yaxshi yorug'lik bo'lishi kerak
+- Kamera to'g'ri joylashgan bo'lishi kerak
+- Yuz to'g'ridan-to'g'ri kameraga qarashi kerak
+
+Muammo: "Yuz tanilmadi"
+Yechim:
+- Person'ning rasmi database'da mavjudmi tekshiring
+- Face encoding yaratilganmi tekshiring
+- Passport orqali login qiling
+
+Muammo: "Passport yoki tug'ilgan sana noto'g'ri"
+Yechim:
+- Passport format: AD3145734 (2 harf + 7 raqam)
+- Sana format: YYYY-MM-DD (1988-02-29)
+- Database'da Person mavjudligini tekshiring
+
+
+================================================================================
+                        12. TEXNIK MA'LUMOTLAR
+================================================================================
+
+Database: PostgreSQL
+ORM: Django ORM
+Face Recognition Library: face_recognition (dlib)
+Web Framework: Django 4.2.7
+Frontend: HTML, CSS, JavaScript (Vanilla JS)
+Image Processing: OpenCV, PIL
+Authentication: Django Session Authentication
+
+
+================================================================================
+                        YAKUNIY ESLATMALAR
+================================================================================
+
+1. Barcha API'lar localhost:8000 da ishlaydi
+2. Production'da HTTPS ishlatish tavsiya etiladi
+3. CSRF token'larni to'g'ri boshqaring
+4. Rate limiting qo'shish tavsiya etiladi
+5. API versiyalash haqida o'ylang (v1, v2, ...)
+
+================================================================================
+                            TUGADI
+================================================================================

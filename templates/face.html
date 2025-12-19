@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kirish - Login</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 550px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 16px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Face Login Styles */
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto 20px;
+            border-radius: 15px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        #videoElement {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        #canvas {
+            display: none;
+        }
+
+        /* Passport Login Styles */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #90caf9;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #81c784;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef9a9a;
+        }
+
+        .person-card {
+            background: #f5f5f5;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+            text-align: center;
+        }
+
+        .person-card.show {
+            display: block;
+        }
+
+        .person-card img {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 15px;
+            border: 4px solid #667eea;
+        }
+
+        .person-card h2 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .person-card .confidence {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn.secondary {
+            background: #6c757d;
+        }
+
+        .scanning {
+            display: inline-block;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .admin-link {
+            text-align: center;
+            padding: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .admin-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .admin-link a:hover {
+            text-decoration: underline;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+
+        .modal-content h2 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .modal-content p {
+            color: #666;
+            margin-bottom: 20px;
+        }
+
+        #captureVideoContainer {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto 20px;
+            border-radius: 15px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        #captureVideo {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .modal-buttons .btn {
+            flex: 1;
+        }
+    </style>
+</head>
+<body>
+<div class="login-container">
+    <div class="header">
+        <h1>🔐 Tizimga Kirish</h1>
+        <p>Yuz yoki passport orqali kiring</p>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('face')">👤 Yuz orqali</button>
+        <button class="tab" onclick="switchTab('passport')">📄 Passport orqali</button>
+    </div>
+
+    <!-- Face Login Tab -->
+    <div id="faceTab" class="tab-content active">
+        <div id="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+        </div>
+        <canvas id="canvas"></canvas>
+
+        <div id="faceStatus" class="status info">
+            <span class="scanning">📷</span> Kamera ishga tushirilmoqda...
+        </div>
+
+        <div id="personCard" class="person-card">
+            <img id="personPhoto" src="" alt="Person">
+            <h2 id="personName">-</h2>
+            <div class="confidence">Aniqlik: <strong id="personConfidence">0%</strong></div>
+            <button id="loginBtn" class="btn">Dashboard ga Kirish</button>
+        </div>
+
+        <button id="scanBtn" class="btn secondary" style="display: none;">
+            Qayta Skanerlash
+        </button>
+    </div>
+
+    <!-- Passport Login Tab -->
+    <div id="passportTab" class="tab-content">
+        <form id="passportForm" onsubmit="return passportLogin(event)">
+            <div id="passportStatus" class="status info" style="display:none;"></div>
+
+            <div class="form-group">
+                <label for="passportUsername">Passport (Seriya + Raqam)</label>
+                <input
+                        type="text"
+                        id="passportUsername"
+                        name="username"
+                        placeholder="AD2423695"
+                        required
+                        maxlength="9"
+                        autocomplete="username"
+                        style="text-transform: uppercase;"
+                        oninput="formatPassportUsername(this)"
+                >
+                <small class="hint">Masalan: <b>AD2423695</b></small>
+            </div>
+
+            <button type="submit" class="btn" id="passportLoginBtn">
+                Kirish
+            </button>
+        </form>
+    </div>
+
+
+    <div class="admin-link">
+        <a href="/admin/">Admin (parol bilan kirish)</a>
+    </div>
+</div>
+
+<!-- Photo Capture Modal -->
+<div id="photoCaptureModal" class="modal">
+    <div class="modal-content">
+        <h2>📸 Rasmingizni oling</h2>
+        <p>Login yakunlash uchun rasmingizni oling</p>
+
+        <div id="captureVideoContainer">
+            <video id="captureVideo" autoplay playsinline></video>
+        </div>
+        <canvas id="captureCanvas" style="display: none;"></canvas>
+
+        <div id="captureStatus" class="status info" style="display: none;"></div>
+
+        <div class="modal-buttons">
+            <button id="capturePhotoBtn" class="btn">📷 Rasm olish</button>
+            <button id="skipPhotoBtn" class="btn secondary">⏭️ O'tkazib yuborish</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab switching
+    function switchTab(tab) {
+        // Update tabs
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+        if (tab === 'face') {
+            document.querySelectorAll('.tab')[0].classList.add('active');
+            document.getElementById('faceTab').classList.add('active');
+            if (!faceLoginStarted) {
+                startCamera();
+                faceLoginStarted = true;
+            }
+        } else {
+            document.querySelectorAll('.tab')[1].classList.add('active');
+            document.getElementById('passportTab').classList.add('active');
+        }
+    }
+
+    // =================== FACE LOGIN ===================
+    const video = document.getElementById('videoElement');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const faceStatus = document.getElementById('faceStatus');
+    const personCard = document.getElementById('personCard');
+    const personPhoto = document.getElementById('personPhoto');
+    const personName = document.getElementById('personName');
+    const personConfidence = document.getElementById('personConfidence');
+    const loginBtn = document.getElementById('loginBtn');
+    const scanBtn = document.getElementById('scanBtn');
+
+    let isScanning = false;
+    let recognizedPerson = null;
+    let scanInterval = null;
+    let faceLoginStarted = false;
+    let scanTimeout = null;
+    let scanStartTime = null;
+    const SCAN_TIMEOUT_MS = 5000; // 5 soniya
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: 'user'
+                }
+            });
+            video.srcObject = stream;
+
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                showFaceStatus('info', '✅ Kamera tayyor. Yuzingizni ko\'rsating...');
+                startScanning();
+            };
+        } catch (err) {
+            console.error('Camera error:', err);
+            showFaceStatus('error', '❌ Kamera ochilmadi. Iltimos ruxsat bering.');
+        }
+    }
+
+    function showFaceStatus(type, message) {
+        faceStatus.className = `status ${type}`;
+        faceStatus.innerHTML = message;
+    }
+
+    function startScanning() {
+        if (isScanning) return;
+
+        isScanning = true;
+        scanStartTime = Date.now();
+        personCard.classList.remove('show');
+        scanBtn.style.display = 'none';
+
+        // Countdown ko'rsatish
+        let countdown = Math.ceil(SCAN_TIMEOUT_MS / 1000);
+        showFaceStatus('info', `<span class="scanning">🔍</span> Yuz izlanmoqda... (${countdown} soniya)`);
+
+        const countdownInterval = setInterval(() => {
+            const elapsed = Date.now() - scanStartTime;
+            const remaining = Math.ceil((SCAN_TIMEOUT_MS - elapsed) / 1000);
+
+            if (remaining > 0 && isScanning) {
+                showFaceStatus('info', `<span class="scanning">🔍</span> Yuz izlanmoqda... (${remaining} soniya)`);
+            } else {
+                clearInterval(countdownInterval);
+            }
+        }, 500);
+
+        // Her 2 soniyada skanerlash
+        scanInterval = setInterval(() => {
+            captureAndRecognize();
+        }, 2000);
+
+        // 5 soniyadan keyin timeout
+        scanTimeout = setTimeout(() => {
+            if (isScanning) {
+                clearInterval(countdownInterval);
+                stopScanning();
+                showFaceStatus('error', '❌ Yuz aniqlanmadi (5 soniya). Passport orqali kiring yoki qayta urinib ko\'ring.');
+                scanBtn.style.display = 'block';
+                scanBtn.textContent = 'Qayta Skanerlash';
+
+                // 3 soniyadan keyin passport tab'ga o'tish taklifi
+                setTimeout(() => {
+                    if (!recognizedPerson) {
+                        const switchToPassport = confirm('Yuz aniqlanmadi.\n\nPassport orqali kirishni xohlaysizmi?');
+                        if (switchToPassport) {
+                            switchTab('passport');
+                            // Passport input'ga focus
+                            document.getElementById('passportUsername').focus();
+                        }
+                    }
+                }, 3000);
+            }
+        }, SCAN_TIMEOUT_MS);
+    }
+
+    function stopScanning() {
+        isScanning = false;
+        if (scanInterval) {
+            clearInterval(scanInterval);
+            scanInterval = null;
+        }
+        if (scanTimeout) {
+            clearTimeout(scanTimeout);
+            scanTimeout = null;
+        }
+    }
+
+    async function captureAndRecognize() {
+        if (!isScanning) return;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+
+        try {
+            const response = await fetch('/api/face-detect/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    image: imageData
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.person && data.person.is_registered) {
+                recognizedPerson = data.person;
+                stopScanning();
+                showRecognizedPerson(data.person);
+            } else {
+                showFaceStatus('info', '<span class="scanning">🔍</span> Yuz qidirilmoqda...');
+            }
+        } catch (err) {
+            console.error('Recognition error:', err);
+        }
+    }
+
+    function showRecognizedPerson(person) {
+        showFaceStatus('success', '✅ Yuz tanildi!');
+
+        personName.textContent = person.full_name;
+        personConfidence.textContent = `${person.confidence}%`;
+
+        if (person.photo_url) {
+            personPhoto.src = person.photo_url;
+        } else {
+            personPhoto.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23667eea" width="100" height="100"/><text x="50" y="50" font-size="40" fill="white" text-anchor="middle" dy=".3em">👤</text></svg>';
+        }
+
+        personCard.classList.add('show');
+        scanBtn.style.display = 'block';
+    }
+
+    loginBtn.addEventListener('click', async () => {
+        if (!recognizedPerson) return;
+
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Kirish amalga oshirilmoqda...';
+
+        try {
+            const authResponse = await fetch('/api/face-login/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    person_id: recognizedPerson.id
+                })
+            });
+
+            const authData = await authResponse.json();
+
+            if (authData.success) {
+                showFaceStatus('success', '✅ Muvaffaqiyatli! Yo\'naltirilmoqda...');
+                setTimeout(() => {
+                    window.location.href = authData.redirect_url || '/dashboard/';
+                }, 500);
+            } else {
+                showFaceStatus('error', `❌ Login xatolik: ${authData.message || 'Noma\'lum xatolik'}`);
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Dashboard ga Kirish';
+            }
+        } catch (err) {
+            console.error('Login error:', err);
+            showFaceStatus('error', '❌ Login jarayonida xatolik yuz berdi');
+            loginBtn.disabled = false;
+            loginBtn.textContent = 'Dashboard ga Kirish';
+        }
+    });
+
+    scanBtn.addEventListener('click', () => {
+        recognizedPerson = null;
+        startScanning();
+    });
+
+  // =================== PASSPORT LOGIN ===================
+let currentPersonId = null;
+
+async function passportLogin(event) {
+    event.preventDefault();
+
+    const usernameEl = document.getElementById('passportUsername');
+    const submitBtn = document.getElementById('passportLoginBtn');
+
+    const username = (usernameEl.value || '').trim().toUpperCase();
+
+    if (!username) {
+        showPassportStatus('error', '❌ Passport ma\'lumotlarini kiriting');
+        return false;
+    }
+
+    // Format tekshirish: 2 harf + 7 raqam (AD2423695)
+    if (!/^[A-Z]{2}\d{7}$/.test(username)) {
+        showPassportStatus('error', '❌ Passport formati noto\'g\'ri. Masalan: AD2423695');
+        return false;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Kirish amalga oshirilmoqda...';
+    showPassportStatus('info', '⏳ Tekshirilmoqda...');
+
+    try {
+        const response = await fetch('/api/passport-login/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCSRFToken(),
+            },
+            body: JSON.stringify({
+                username: username
+            })
+        });
+
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (e) {
+            data = { success: false, error: 'Server noto\'g\'ri javob qaytardi' };
+        }
+
+        if (response.ok && data.success) {
+            showPassportStatus('success', '✅ Muvaffaqiyatli!');
+
+            // Person ID'ni saqlash
+            currentPersonId = data.person_id;
+
+            // Rasm olish kerakmi?
+            if (data.requires_photo) {
+                // Photo capture modal'ni ochish
+                setTimeout(() => {
+                    openPhotoCaptureModal();
+                }, 500);
+            } else {
+                // Dashboard'ga o'tish
+                setTimeout(() => {
+                    window.location.href = '/dashboard/';
+                }, 500);
+            }
+        } else {
+            showPassportStatus('error', `❌ ${data.error || 'Login xatolik'}`);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Kirish';
+        }
+    } catch (err) {
+        console.error('Passport login error:', err);
+        showPassportStatus('error', '❌ Login jarayonida xatolik yuz berdi');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Kirish';
+    }
+
+    return false;
+}
+
+function showPassportStatus(type, message) {
+    const statusDiv = document.getElementById('passportStatus');
+    statusDiv.className = `status ${type}`;
+    statusDiv.innerHTML = message;
+    statusDiv.style.display = 'block';
+}
+
+// ✅ Django uchun CSRF olish (agar CSRF ishlatayotgan bo‘lsang)
+function getCSRFToken() {
+    const name = 'csrftoken=';
+    const parts = document.cookie.split(';');
+    for (let p of parts) {
+        p = p.trim();
+        if (p.startsWith(name)) return p.substring(name.length);
+    }
+    return '';
+}
+
+
+    // =================== PHOTO CAPTURE MODAL ===================
+    const photoCaptureModal = document.getElementById('photoCaptureModal');
+    const captureVideo = document.getElementById('captureVideo');
+    const captureCanvas = document.getElementById('captureCanvas');
+    const captureCtx = captureCanvas.getContext('2d');
+    const capturePhotoBtn = document.getElementById('capturePhotoBtn');
+    const skipPhotoBtn = document.getElementById('skipPhotoBtn');
+    const captureStatus = document.getElementById('captureStatus');
+
+    let captureStream = null;
+
+    async function openPhotoCaptureModal() {
+        photoCaptureModal.classList.add('show');
+
+        try {
+            captureStream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: 'user'
+                }
+            });
+            captureVideo.srcObject = captureStream;
+
+            captureVideo.onloadedmetadata = () => {
+                captureCanvas.width = captureVideo.videoWidth;
+                captureCanvas.height = captureVideo.videoHeight;
+            };
+        } catch (err) {
+            console.error('Camera error:', err);
+            showCaptureStatus('error', '❌ Kamera ochilmadi');
+        }
+    }
+
+    function closePhotoCaptureModal() {
+        photoCaptureModal.classList.remove('show');
+
+        if (captureStream) {
+            captureStream.getTracks().forEach(track => track.stop());
+            captureStream = null;
+        }
+    }
+
+    function showCaptureStatus(type, message) {
+        captureStatus.className = `status ${type}`;
+        captureStatus.innerHTML = message;
+        captureStatus.style.display = 'block';
+    }
+
+    capturePhotoBtn.addEventListener('click', async () => {
+        if (!currentPersonId) return;
+
+        capturePhotoBtn.disabled = true;
+        capturePhotoBtn.textContent = 'Yuklanmoqda...';
+        showCaptureStatus('info', '⏳ Rasm saqlanmoqda...');
+
+        try {
+            // Rasmni olish
+            captureCtx.drawImage(captureVideo, 0, 0, captureCanvas.width, captureCanvas.height);
+            const imageData = captureCanvas.toDataURL('image/jpeg', 0.8);
+
+            // Server'ga yuborish
+            const response = await fetch('/api/upload-login-photo/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    person_id: currentPersonId,
+                    image: imageData
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showCaptureStatus('success', '✅ Rasm saqlandi! Dashboard\'ga yo\'naltirilmoqda...');
+                setTimeout(() => {
+                    closePhotoCaptureModal();
+                    window.location.href = '/dashboard/';
+                }, 1500);
+            } else {
+                showCaptureStatus('error', `❌ ${data.error || 'Rasm saqlanmadi'}`);
+                capturePhotoBtn.disabled = false;
+                capturePhotoBtn.textContent = '📷 Rasm olish';
+            }
+        } catch (err) {
+            console.error('Photo upload error:', err);
+            showCaptureStatus('error', '❌ Xatolik yuz berdi');
+            capturePhotoBtn.disabled = false;
+            capturePhotoBtn.textContent = '📷 Rasm olish';
+        }
+    });
+
+    skipPhotoBtn.addEventListener('click', () => {
+        closePhotoCaptureModal();
+        window.location.href = '/dashboard/';
+    });
+
+    // Start face login by default
+    startCamera();
+    faceLoginStarted = true;
+</script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+================================================================================
+                    SERVER XATOSINI TUZATISH (GUNICORN)
+================================================================================
+
+📅 Muammo: Excel upload vaqtida gunicorn worker timeout
+🔧 Yechim: Timeout'ni oshirish va konfiguratsiya sozlash
+
+
+================================================================================
+                        1. TEZKOR YECHIM (ODDIY)
+================================================================================
+
+Agar hozir serverni ishlatayotgan bo'lsangiz:
+
+# Gunicorn'ni to'xtatish
+sudo systemctl stop gunicorn
+# yoki
+pkill gunicorn
+
+# Yangi timeout bilan ishga tushirish
+cd /var/www/face
+source venv/bin/activate
+gunicorn --timeout 600 --workers 4 --bind 0.0.0.0:8000 core.wsgi:application
+
+
+================================================================================
+                        2. TO'LIQ YECHIM (TAVSIYA ETILADI)
+================================================================================
+
+### A) Gunicorn konfiguratsiya faylini yaratish
+
+Loyiha papkasida `gunicorn_config.py` yaratildi:
+- Timeout: 600 sekund (10 daqiqa)
+- Workers: CPU * 2 + 1
+- Logging: yoqilgan
+
+### B) Gunicorn'ni yangi konfig bilan ishga tushirish
+
+cd /var/www/face
+source venv/bin/activate
+gunicorn -c gunicorn_config.py core.wsgi:application
+
+
+================================================================================
+                        3. SYSTEMD SERVICE SOZLASH
+================================================================================
+
+Agar systemd service ishlatayotgan bo'lsangiz:
+
+### A) Service faylini tahrirlash
+
+sudo nano /etc/systemd/system/gunicorn.service
+
+### B) Quyidagi qismni o'zgartirish:
+
+[Service]
+...
+ExecStart=/var/www/face/venv/bin/gunicorn \
+    -c /var/www/face/gunicorn_config.py \
+    core.wsgi:application
+
+# yoki to'g'ridan-to'g'ri timeout ko'rsatish:
+ExecStart=/var/www/face/venv/bin/gunicorn \
+    --timeout 600 \
+    --workers 4 \
+    --bind 0.0.0.0:8000 \
+    core.wsgi:application
+
+### C) Service'ni qayta yuklash
+
+sudo systemctl daemon-reload
+sudo systemctl restart gunicorn
+sudo systemctl status gunicorn
+
+
+================================================================================
+                        4. NGINX TIMEOUT HAM O'ZGARTIRISH
+================================================================================
+
+Agar Nginx ishlatayotgan bo'lsangiz, uni ham sozlash kerak:
+
+sudo nano /etc/nginx/sites-available/your-site
+
+# Quyidagini qo'shing yoki o'zgartiring:
+
+location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+    # MUHIM: Timeout sozlamalari
+    proxy_connect_timeout 600;
+    proxy_send_timeout 600;
+    proxy_read_timeout 600;
+    send_timeout 600;
+
+    # File upload size limit
+    client_max_body_size 100M;
+}
+
+# Nginx'ni qayta yuklash
+sudo nginx -t
+sudo systemctl reload nginx
+
+
+================================================================================
+                        5. TEKSHIRISH
+================================================================================
+
+### A) Gunicorn loglarni ko'rish
+
+# Real-time log
+sudo tail -f /var/log/gunicorn/error.log
+
+# yoki
+sudo journalctl -u gunicorn -f
+
+### B) Timeout'ni tekshirish
+
+# Gunicorn jarayonini topish
+ps aux | grep gunicorn
+
+# Konfiguratsiyani ko'rish
+cat gunicorn_config.py
+
+
+================================================================================
+                        6. BOSHQA YECHIMLAR
+================================================================================
+
+### A) Worker Class o'zgartirish (advanced)
+
+Agar Excel upload hali ham muammo bo'lsa:
+
+gunicorn_config.py da:
+worker_class = 'gevent'  # yoki 'eventlet'
+
+Keyin:
+pip install gevent
+# yoki
+pip install eventlet
+
+### B) Background Task (eng yaxshi yechim)
+
+Excel uploadni background task'ka o'tkazish (Celery):
+
+1. Celery o'rnatish:
+   pip install celery redis
+
+2. Task yaratish:
+   @celery_app.task
+   def process_excel_file(file_path):
+       # Excel processing logic
+
+3. View'da:
+   process_excel_file.delay(file_path)
+   return JsonResponse({'message': 'Processing started'})
+
+
+================================================================================
+                        7. UMUMIY XATOLAR VA YECHIMLAR
+================================================================================
+
+### XATO 1: SystemExit: 1
+Sabab: Worker timeout
+Yechim: Timeout'ni oshirish (600 sekund)
+
+### XATO 2: Worker timeout
+Sabab: Excel processing juda uzoq
+Yechim: Background task ishlatish (Celery)
+
+### XATO 3: password must be string
+Sabab: Password date obyekti
+Yechim: ✅ Allaqachon tuzatdik (str(password))
+
+### XATO 4: ConnectionResetError
+Sabab: Nginx timeout
+Yechim: proxy_read_timeout'ni oshirish
+
+
+================================================================================
+                        8. PRODUCTION SOZLAMALARI
+================================================================================
+
+# settings.py
+DEBUG = False
+ALLOWED_HOSTS = ['your-domain.com', 'www.your-domain.com']
+
+# Gunicorn workers
+workers = (CPU_COUNT * 2) + 1
+
+# Timeout
+timeout = 600  # Excel upload uchun
+
+# Logging
+accesslog = '/var/log/gunicorn/access.log'
+errorlog = '/var/log/gunicorn/error.log'
+
+# Static/Media
+STATIC_ROOT = '/var/www/face/staticfiles'
+MEDIA_ROOT = '/var/www/face/media'
+
+
+================================================================================
+                        9. ISHGA TUSHIRISH (QADAM-BAQADAM)
+================================================================================
+
+1. Kod o'zgarishlarini serverga yuklash:
+   git pull
+   # yoki
+   scp -r /local/path user@server:/var/www/face
+
+2. Virtual environment aktivlashtirish:
+   cd /var/www/face
+   source venv/bin/activate
+
+3. Yangi kutubxonalarni o'rnatish (agar kerak bo'lsa):
+   pip install -r requirements.txt
+
+4. Migration'lar (agar kerak bo'lsa):
+   python manage.py migrate
+
+5. Static fayllarni yig'ish:
+   python manage.py collectstatic --noinput
+
+6. Gunicorn'ni to'xtatish:
+   sudo systemctl stop gunicorn
+
+7. Yangi konfig bilan ishga tushirish:
+   gunicorn -c gunicorn_config.py core.wsgi:application
+   # yoki
+   sudo systemctl start gunicorn
+
+8. Nginx'ni qayta yuklash:
+   sudo systemctl reload nginx
+
+9. Tekshirish:
+   sudo systemctl status gunicorn
+   sudo tail -f /var/log/gunicorn/error.log
+
+
+================================================================================
+                        10. MONITORING
+================================================================================
+
+# Gunicorn status
+sudo systemctl status gunicorn
+
+# Nginx status
+sudo systemctl status nginx
+
+# Logs
+sudo tail -f /var/log/gunicorn/error.log
+sudo tail -f /var/log/nginx/error.log
+
+# Process'lar
+ps aux | grep gunicorn
+ps aux | grep nginx
+
+
+================================================================================
+                        XULOSA
+================================================================================
+
+ASOSIY YECHIM:
+1. ✅ Password formatini tuzatdik (str() qo'shdik)
+2. ✅ gunicorn_config.py yaratdik (timeout=600)
+3. ✅ Gunicorn'ni yangi konfig bilan ishga tushiring
+
+QISQASI:
+cd /var/www/face
+source venv/bin/activate
+gunicorn -c gunicorn_config.py core.wsgi:application
+
+Yoki systemd:
+sudo systemctl daemon-reload
+sudo systemctl restart gunicorn
+
+OMAD! 🚀
