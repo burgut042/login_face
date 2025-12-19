@@ -1,4 +1,5 @@
 venv311/
+venv/
 .idea/
 media/
 __pycache__/
