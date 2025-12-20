@@ -7,6 +7,7 @@ from .views import (
     detect_face,
     face_login_auth,
     passport_login_auth,
+    person_crud_api,
     upload_login_photo,
     get_current_user,
     logout_view,
@@ -42,4 +43,9 @@ urlpatterns = [
 
     # === LOGIN LOGS API ===
     path('api/login-logs/', get_login_logs, name='login-logs'),
+
+        # === PERSON CRUD API ===
+    path('api/person/', person_crud_api, name='person-crud-list'),
+    path('api/person/<int:person_id>/', person_crud_api, name='person-crud-detail'),
+
 ]

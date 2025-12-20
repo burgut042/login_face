@@ -1404,3 +1404,335 @@ def get_login_logs(request):
             'success': False,
             'error': str(e)
         }, status=500)
+
+
+# =====================================================
+# UNIVERSAL CRUD API
+# =====================================================
+
+@csrf_exempt
+def person_crud_api(request, person_id=None):
+    """
+    UNIVERSAL CRUD API - Bitta endpoint barcha CRUD operatsiyalari uchun
+    
+    Methods:
+    - GET    /api/person/           → Barcha personlarni olish (List/Read All)
+    - GET    /api/person/<id>/      → Bitta personni olish (Read One)
+    - POST   /api/person/           → Yangi person yaratish (Create)
+    - PUT    /api/person/<id>/      → Person yangilash (Update - to'liq)
+    - PATCH  /api/person/<id>/      → Person qisman yangilash (Update - partial)
+    - DELETE /api/person/<id>/      → Person o'chirish (Delete)
+    """
+    from .models import Person
+    import json
+    from datetime import datetime, date
+    from django.core.files.base import ContentFile
+    import base64
+    import os
+
+    try:
+        # ==================== READ ALL (GET without ID) ====================
+        if request.method == 'GET' and person_id is None:
+            # Query parameters
+            limit = int(request.GET.get('limit', 50))
+            offset = int(request.GET.get('offset', 0))
+            search = request.GET.get('search', '').strip()
+
+            # Base query
+            persons = Person.objects.all()
+
+            # Search filter
+            if search:
+                from django.db.models import Q
+                persons = persons.filter(
+                    Q(first_name__icontains=search) |
+                    Q(last_name__icontains=search) |
+                    Q(middle_name__icontains=search) |
+                    Q(passport_series__icontains=search) |
+                    Q(passport_number__icontains=search) |
+                    Q(pinfl__icontains=search)
+                )
+
+            total_count = persons.count()
+            persons = persons.order_by('-id')[offset:offset + limit]
+
+            # Serialize
+            persons_data = []
+            for person in persons:
+                persons_data.append({
+                    'id': person.id,
+                    'first_name': person.first_name,
+                    'last_name': person.last_name,
+                    'middle_name': person.middle_name,
+                    'full_name': person.full_name,
+                    'passport_series': person.passport_series,
+                    'passport_number': person.passport_number,
+                    'birth_date': person.birth_date.strftime('%Y-%m-%d') if person.birth_date else None,
+                    'pinfl': person.pinfl,
+                    'position': person.position,
+                    'district': person.district,
+                    'department': person.department,
+                    'phone_number': person.phone_number,
+                    'mahalla': person.mahalla,
+                    'jeton_series': person.jeton_series,
+                    'has_photo': bool(person.photo),
+                    'photo_url': request.build_absolute_uri(person.photo.url) if person.photo else None,
+                    'has_face_encoding': bool(person.face_encoding),
+                    'registered_at': person.registered_at.strftime('%Y-%m-%d %H:%M:%S'),
+                })
+
+            return JsonResponse({
+                'success': True,
+                'total_count': total_count,
+                'limit': limit,
+                'offset': offset,
+                'data': persons_data
+            })
+
+        # ==================== READ ONE (GET with ID) ====================
+        elif request.method == 'GET' and person_id is not None:
+            try:
+                person = Person.objects.get(id=person_id)
+            except Person.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Person ID {person_id} topilmadi'
+                }, status=404)
+
+
+            return JsonResponse({
+                'success': True,
+                'data': {
+                    'id': person.id,
+                    'first_name': person.first_name,
+                    'last_name': person.last_name,
+                    'middle_name': person.middle_name,
+                    'full_name': person.full_name,
+                    'passport_series': person.passport_series,
+                    'passport_number': person.passport_number,
+                    'birth_date': person.birth_date.strftime('%Y-%m-%d') if person.birth_date else None,
+                    'pinfl': person.pinfl,
+                    'position': person.position,
+                    'district': person.district,
+                    'department': person.department,
+                    'phone_number': person.phone_number,
+                    'mahalla': person.mahalla,
+                    'jeton_series': person.jeton_series,
+                    'has_photo': bool(person.photo),
+                    'photo_url': request.build_absolute_uri(person.photo.url) if person.photo else None,
+                    'has_face_encoding': bool(person.face_encoding),
+                    'registered_at': person.registered_at.strftime('%Y-%m-%d %H:%M:%S'),
+                }
+            })
+
+        # ==================== CREATE (POST without ID) ====================
+        elif request.method == 'POST' and person_id is None:
+            data = json.loads(request.body)
+
+            # Required fields validation
+            if not data.get('first_name') or not data.get('last_name'):
+                return JsonResponse({
+                    'success': False,
+                    'error': 'first_name va last_name majburiy'
+                }, status=400)
+
+            # Create person
+            person = Person()
+            person.first_name = data.get('first_name', '').strip()
+            person.last_name = data.get('last_name', '').strip()
+            person.middle_name = data.get('middle_name', '').strip() or None
+            person.passport_series = data.get('passport_series', '').strip() or None
+            person.passport_number = data.get('passport_number', '').strip() or None
+            person.pinfl = data.get('pinfl', '').strip() or None
+            person.position = data.get('position', '').strip() or None
+            person.district = data.get('district', '').strip() or None
+            person.department = data.get('department', '').strip() or None
+            person.phone_number = data.get('phone_number', '').strip() or None
+            person.mahalla = data.get('mahalla', '').strip() or None
+            person.jeton_series = data.get('jeton_series', '').strip() or None
+
+            # Birth date parsing
+            if data.get('birth_date'):
+                try:
+                    person.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                except:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'birth_date formati noto\'g\'ri. Masalan: 1990-01-15'
+                    }, status=400)
+
+            # Photo upload (base64)
+            if data.get('photo'):
+                try:
+                    # Decode base64
+                    if ',' in data['photo']:
+                        header, encoded = data['photo'].split(',', 1)
+                    else:
+                        encoded = data['photo']
+
+                    image_bytes = base64.b64decode(encoded)
+
+                    # Save
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"person_{timestamp}.jpg"
+                    person.photo.save(filename, ContentFile(image_bytes))
+
+                    # Generate face encoding
+                    image = face_recognition.load_image_file(person.photo.path)
+                    encodings = face_recognition.face_encodings(image)
+                    if encodings:
+                        person.face_encoding = encodings[0].tolist()
+
+
+                except Exception as e:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'Rasmni yuklashda xatolik: {str(e)}'
+                    }, status=400)
+
+            person.save()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'{person.full_name} muvaffaqiyatli yaratildi',
+                'data': {
+                    'id': person.id,
+                    'full_name': person.full_name
+                }
+            }, status=201)
+
+        # ==================== UPDATE (PUT/PATCH with ID) ====================
+        elif request.method in ['PUT', 'PATCH'] and person_id is not None:
+            try:
+                person = Person.objects.get(id=person_id)
+            except Person.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Person ID {person_id} topilmadi'
+                }, status=404)
+
+            data = json.loads(request.body)
+
+            # Update fields (if provided)
+            if 'first_name' in data:
+                person.first_name = data['first_name'].strip()
+            if 'last_name' in data:
+                person.last_name = data['last_name'].strip()
+            if 'middle_name' in data:
+                person.middle_name = data['middle_name'].strip() or None
+            if 'passport_series' in data:
+                person.passport_series = data['passport_series'].strip() or None
+            if 'passport_number' in data:
+                person.passport_number = data['passport_number'].strip() or None
+            if 'pinfl' in data:
+                person.pinfl = data['pinfl'].strip() or None
+            if 'position' in data:
+                person.position = data['position'].strip() or None
+            if 'district' in data:
+                person.district = data['district'].strip() or None
+            if 'department' in data:
+                person.department = data['department'].strip() or None
+            if 'phone_number' in data:
+                person.phone_number = data['phone_number'].strip() or None
+            if 'mahalla' in data:
+                person.mahalla = data['mahalla'].strip() or None
+            if 'jeton_series' in data:
+                person.jeton_series = data['jeton_series'].strip() or None
+
+            # Birth date
+            if 'birth_date' in data:
+                try:
+                    person.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                except:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'birth_date formati noto\'g\'ri'
+                    }, status=400)
+
+            # Photo update
+            if 'photo' in data and data['photo']:
+                try:
+                    # Delete old photo
+                    if person.photo:
+                        if os.path.exists(person.photo.path):
+                            os.remove(person.photo.path)
+                        person.photo.delete(save=False)
+
+                    # Upload new photo
+                    if ',' in data['photo']:
+                        header, encoded = data['photo'].split(',', 1)
+                    else:
+                        encoded = data['photo']
+
+                    image_bytes = base64.b64decode(encoded)
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"person_{person.id}_{timestamp}.jpg"
+                    person.photo.save(filename, ContentFile(image_bytes))
+
+                    # Regenerate face encoding
+                    image = face_recognition.load_image_file(person.photo.path)
+                    encodings = face_recognition.face_encodings(image)
+                    if encodings:
+                        person.face_encoding = encodings[0].tolist()
+                    else:
+                        person.face_encoding = None
+
+
+                except Exception as e:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'Rasmni yangilashda xatolik: {str(e)}'
+                    }, status=400)
+
+            person.save()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'{person.full_name} muvaffaqiyatli yangilandi',
+                'data': {
+                    'id': person.id,
+                    'full_name': person.full_name
+                }
+            })
+
+        # ==================== DELETE (DELETE with ID) ====================
+        elif request.method == 'DELETE' and person_id is not None:
+            try:
+                person = Person.objects.get(id=person_id)
+            except Person.DoesNotExist:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'Person ID {person_id} topilmadi'
+                }, status=404)
+
+            full_name = person.full_name
+
+            # Delete photo from disk
+            if person.photo:
+                if os.path.exists(person.photo.path):
+                    os.remove(person.photo.path)
+
+            person.delete()
+
+            return JsonResponse({
+                'success': True,
+                'message': f'{full_name} muvaffaqiyatli o\'chirildi'
+            })
+
+        # ==================== METHOD NOT ALLOWED ====================
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': 'Method not allowed'
+            }, status=405)
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'error': 'Noto\'g\'ri JSON format'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
