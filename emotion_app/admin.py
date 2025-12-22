@@ -16,13 +16,17 @@ class LoginLogInline(admin.TabularInline):
     model = LoginLog
     extra = 0
     readonly_fields = ['login_time', 'login_method', 'login_photo_preview', 'ip_address', 'confidence']
-    fields = ['login_time', 'login_method', 'login_photo_preview', 'confidence', 'ip_address'] 
+    fields = ['login_time', 'login_method', 'login_photo_preview', 'confidence', 'ip_address']
     can_delete = False
     max_num = 10  # Oxirgi 10 ta logni ko'rsatish
+    fk_name = 'inspector'  # V1 da inspector field
 
     def login_photo_preview(self, obj):
+        """Login photo preview (V1 - login_photo path string)"""
         if obj.login_photo:
-            return format_html('<img src="{}" width="100" height="100" style="object-fit: cover; border-radius: 5px;" />', obj.login_photo.url)
+            from django.conf import settings
+            photo_url = f"{settings.MEDIA_URL}{obj.login_photo}"
+            return format_html('<img src="{}" width="100" height="100" style="object-fit: cover; border-radius: 5px;" />', photo_url)
         return "Rasm yo'q"
     login_photo_preview.short_description = 'Rasm'
 
@@ -34,10 +38,17 @@ class LoginLogInline(admin.TabularInline):
 # Person Resource - Import/Export uchun
 # =====================================================
 class PersonResource(resources.ModelResource):
-    """Person modelini import/export qilish uchun"""
+    """Person modelini import/export qilish uchun (V1 format)"""
 
     # Rasm maydonini qo'shimcha qilish (Base64 format)
     photo_base64 = fields.Field(column_name='photo_base64')
+
+    # Backward compatibility - export uchun alohida fields
+    passport_series = fields.Field(column_name='passport_series')
+    passport_number = fields.Field(column_name='passport_number')
+    district = fields.Field(column_name='district')
+    phone_number = fields.Field(column_name='phone_number')
+    jeton_series = fields.Field(column_name='jeton_series')
 
     class Meta:
         model = Person
@@ -46,34 +57,64 @@ class PersonResource(resources.ModelResource):
             'first_name',
             'last_name',
             'middle_name',
-            'passport_series',
-            'passport_number',
+            'passport',  # V1 birlashgan field
+            'passport_series',  # Export uchun property
+            'passport_number',  # Export uchun property
             'birth_date',
             'pinfl',
             'position',
-            'district',
+            'tuman',  # V1 field
+            'district',  # Export uchun property
             'department',
-            'phone_number',
+            'phone',  # V1 field
+            'phone_number',  # Export uchun property
             'mahalla',
-            'jeton_series',
+            'badge_number',  # V1 field
+            'jeton_series',  # Export uchun property
+            'special_rank',  # V1 field
             'photo_base64',
             'registered_at',
         )
         export_order = fields
-        # MUHIM: Passport seriya VA raqam bo'yicha yangilash
-        import_id_fields = ['passport_series', 'passport_number']
+        # MUHIM: Passport bo'yicha yangilash (V1 birlashgan format)
+        import_id_fields = ['passport']
         skip_unchanged = True
         report_skipped = True
         use_bulk = False  # Har bir Person uchun save() chaqiriladi (User yaratish uchun)
+
+    def dehydrate_passport_series(self, person):
+        """Export: Passport seriyasini ajratib olish"""
+        return person.passport_series
+
+    def dehydrate_passport_number(self, person):
+        """Export: Passport raqamini ajratib olish"""
+        return person.passport_number
+
+    def dehydrate_district(self, person):
+        """Export: Tuman (backward compatibility)"""
+        return person.district
+
+    def dehydrate_phone_number(self, person):
+        """Export: Phone number (backward compatibility)"""
+        return person.phone_number
+
+    def dehydrate_jeton_series(self, person):
+        """Export: Jeton series (backward compatibility)"""
+        return person.jeton_series
 
     def dehydrate_photo_base64(self, person):
         """Export: Rasmni base64 formatga o'tkazish"""
         if person.photo:
             try:
-                with person.photo.open('rb') as f:
-                    return base64.b64encode(f.read()).decode('utf-8')
+                # V1 da photo - path string, ImageField emas
+                import os
+                from django.conf import settings
+                photo_path = os.path.join(settings.MEDIA_ROOT, str(person.photo))
+                if os.path.exists(photo_path):
+                    with open(photo_path, 'rb') as f:
+                        return base64.b64encode(f.read()).decode('utf-8')
             except:
-                return ''
+                pass
         return ''
 
     def before_import_row(self, row, **kwargs):
@@ -117,8 +158,21 @@ class PersonResource(resources.ModelResource):
                     }
                     file_ext = format_ext_map.get(original_format.upper(), 'jpg')
 
-                    filename = f"{instance.passport_series or instance.id}.{file_ext}"
-                    instance.photo.save(filename, ContentFile(img_bytes), save=False)
+                    # V1 da photo - CharField (path), ImageField emas
+                    filename = f"{instance.passport or instance.id}.{file_ext}"
+                    import os
+                    from django.conf import settings
+
+                    # Rasmni saqlash
+                    photo_dir = os.path.join(settings.MEDIA_ROOT, 'faces')
+                    os.makedirs(photo_dir, exist_ok=True)
+                    photo_path = os.path.join(photo_dir, filename)
+
+                    with open(photo_path, 'wb') as f:
+                        f.write(img_bytes)
+
+                    # Path ni saqlash (MEDIA_ROOT nisbatan)
+                    instance.photo = f"faces/{filename}"
                 except Exception as e:
                     print(f"Rasm saqlashda xatolik: {e}")
                     pass
@@ -134,17 +188,23 @@ class PersonResource(resources.ModelResource):
 
     def before_save_instance(self, instance, row, **kwargs):
         """
-        Saqlashdan oldin ma'lumotlarni tekshirish
+        Saqlashdan oldin ma'lumotlarni tekshirish (V1 format)
         """
         # Ism va familiyani trim qilish
         if instance.first_name:
             instance.first_name = instance.first_name.strip()
         if instance.last_name:
             instance.last_name = instance.last_name.strip()
-        if instance.passport_series:
-            instance.passport_series = instance.passport_series.upper().strip()
-        if instance.passport_number:
-            instance.passport_number = instance.passport_number.strip()
+
+        # Passport birlashtirilgan format (V1)
+        # Agar import da passport_series va passport_number bo'lsa, ularni birlashtiramiz
+        passport_series = row.get('passport_series', '').strip().upper()
+        passport_number = str(row.get('passport_number', '')).strip()
+
+        if passport_series and passport_number:
+            instance.passport = f"{passport_series}{passport_number}"
+        elif hasattr(instance, 'passport') and instance.passport:
+            instance.passport = instance.passport.upper().strip()
 
 
 @admin.register(Person)
@@ -178,11 +238,10 @@ class PersonAdmin(ImportExportModelAdmin):
         'id',
         'first_name',
         'last_name',
-        'passport_series',
-        'passport_number',
+        'passport',  # V1 birlashgan passport
         'birth_date',
         'position',
-        'district',
+        'tuman',  # V1 da tuman
         'department',
         'registered_at',
     ]
@@ -193,20 +252,20 @@ class PersonAdmin(ImportExportModelAdmin):
     list_filter = [
         'registered_at',
         'position',
-        'district',
+        'tuman',  # V1 da tuman field
         'department',
-        'passport_series',  # Passport seriya bo'yicha filter
+        'passport',  # V1 da birlashgan passport field
     ]
 
     search_fields = [
         'first_name',
         'last_name',
         'middle_name',
-        'passport_series',
+        'passport',  # V1 birlashgan passport
         'pinfl',
         'position',
-        'district',
-        'phone_number',
+        'tuman',  # V1 da tuman
+        'phone',  # V1 da phone
     ]
 
     readonly_fields = [
@@ -221,10 +280,10 @@ class PersonAdmin(ImportExportModelAdmin):
             'fields': ('first_name', 'last_name', 'middle_name')
         }),
         ('Login Ma\'lumotlari', {
-            'fields': ('passport_series', 'passport_number', 'birth_date', 'pinfl')
+            'fields': ('passport', 'birth_date', 'pinfl')  # V1 birlashgan passport
         }),
         ('Ish Ma\'lumotlari', {
-            'fields': ('position', 'district', 'department', 'phone_number', 'mahalla', 'jeton_series')
+            'fields': ('position', 'tuman', 'department', 'phone', 'mahalla', 'badge_number', 'special_rank')  # V1 fields
         }),
         ('Yuz Tanish', {
             'fields': ('photo', 'photo_preview', 'face_encoding')
@@ -245,11 +304,14 @@ class PersonAdmin(ImportExportModelAdmin):
     full_name.short_description = 'To\'liq ism'
 
     def photo_thumbnail(self, obj):
-        """Ro'yxatda kichik rasm ko'rsatish"""
+        """Ro'yxatda kichik rasm ko'rsatish (V1 - photo path string)"""
         if obj.photo:
+            from django.templatetags.static import static
+            from django.conf import settings
+            photo_url = f"{settings.MEDIA_URL}{obj.photo}"
             return format_html(
                 '<img src="{}" width="50" height="50" style="object-fit: cover; border-radius: 5px; border: 1px solid #ddd;" />',
-                obj.photo.url
+                photo_url
             )
         return format_html('<span style="color: gray; font-size: 12px;">❌</span>')
     photo_thumbnail.short_description = '📷'
@@ -261,10 +323,13 @@ class PersonAdmin(ImportExportModelAdmin):
     has_photo.short_description = 'Rasm'
 
     def photo_preview(self, obj):
+        """Rasm ko'rinishi (V1 - photo path string)"""
         if obj.photo:
+            from django.conf import settings
+            photo_url = f"{settings.MEDIA_URL}{obj.photo}"
             return format_html(
                 '<img src="{}" width="150" height="150" style="object-fit: cover; border-radius: 10px; border: 2px solid #ddd;" />',
-                obj.photo.url
+                photo_url
             )
         return "Rasm yuklanmagan"
     photo_preview.short_description = 'Rasm ko\'rinishi'
@@ -358,7 +423,7 @@ class LoginLogAdmin(admin.ModelAdmin):
 
     list_display = [
         'id',
-        'person',
+        'inspector',  # V1 da inspector field
         'login_method',
         'login_time',
         'ip_address',
@@ -374,14 +439,14 @@ class LoginLogAdmin(admin.ModelAdmin):
     ]
 
     search_fields = [
-        'person__first_name',
-        'person__last_name',
-        'person__passport_series',
+        'inspector__first_name',  # V1 da inspector field
+        'inspector__last_name',
+        'inspector__passport',  # V1 birlashgan passport
         'ip_address',
     ]
 
     readonly_fields = [
-        'person',
+        'inspector',  # V1 da inspector field
         'login_method',
         'login_time',
         'login_photo_preview',
@@ -392,7 +457,7 @@ class LoginLogAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Asosiy Ma\'lumotlar', {
-            'fields': ('person', 'login_method', 'login_time', 'success')
+            'fields': ('inspector', 'login_method', 'login_time', 'success')  # V1 da inspector
         }),
         ('Login Rasmi', {
             'fields': ('login_photo', 'login_photo_preview')
@@ -409,10 +474,13 @@ class LoginLogAdmin(admin.ModelAdmin):
         return request.user.is_superuser
 
     def login_photo_preview(self, obj):
+        """Login photo preview (V1 - login_photo path string)"""
         if obj.login_photo:
+            from django.conf import settings
+            photo_url = f"{settings.MEDIA_URL}{obj.login_photo}"
             return format_html(
                 '<img src="{}" width="300" style="border-radius: 10px; border: 2px solid #ddd;" />',
-                obj.login_photo.url
+                photo_url
             )
         return "Rasm yo'q"
     login_photo_preview.short_description = 'Login rasmi'
