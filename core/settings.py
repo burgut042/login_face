@@ -106,7 +106,7 @@ WSGI_APPLICATION = 'core.wsgi.application'
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "login_face",
+        "NAME": "crime_report_db",  # V1 database bilan birlashtirildi
         "USER": "postgres",
         "PASSWORD": "7879",
         "HOST": "localhost",

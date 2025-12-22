@@ -53,11 +53,11 @@ def create_login_log(person, login_method, request, image_data=None, confidence=
         else:
             ip_address = request.META.get('REMOTE_ADDR')
 
-        # LoginLog yaratish
+        # LoginLog yaratish (V1 login_logs jadvaliga)
         login_log = LoginLog(
-            person=person,
-            login_method=login_method,
-            ip_address=ip_address,
+            inspector=person,  # V1 da inspector field
+            login_method=login_method.upper(),  # V1 da FACE/PASSPORT (uppercase)
+            ip_address=ip_address or '0.0.0.0',
             confidence=confidence,
             success=True
         )
@@ -358,14 +358,12 @@ def face_login_auth(request):
                 'error': "Passport formati noto'g'ri. Masalan: AD2423695"
             }, status=400)
 
-        passport_series = match.group(1)
-        passport_number = match.group(2)
+        passport_full = username_input  # AB1234567 (already uppercased)
 
-        # Person topish
+        # Person topish (V1 inspectors jadvalida)
         try:
             person = Person.objects.get(
-                passport_series=passport_series,
-                passport_number=passport_number
+                passport=passport_full
             )
         except Person.DoesNotExist:
             return JsonResponse({
@@ -547,7 +545,7 @@ def face_login_auth(request):
         # 5-QADAM: USER VA LOGIN
         # =============================
         # Django User yaratish/olish
-        username_for_django = f"{passport_series}{passport_number}"
+        username_for_django = person.passport  # V1 da birlashgan passport
         user, created = User.objects.get_or_create(
             username=username_for_django,
             defaults={
@@ -667,16 +665,14 @@ def passport_login_auth(request):
                 'error': "Passport formati noto'g'ri. Masalan: AD2423695"
             }, status=400)
 
-        passport_series = match.group(1)   # AD
-        passport_number = match.group(2)   # 2423695
+        passport_full = passport_input  # AD2423695
 
         # =============================
         # PERSON TOPISH (faqat passport bo'yicha)
         # =============================
         try:
             person = Person.objects.get(
-                passport_series=passport_series,
-                passport_number=passport_number
+                passport=passport_full
             )
         except Person.DoesNotExist:
             return JsonResponse({
@@ -687,7 +683,7 @@ def passport_login_auth(request):
         # =============================
         # DJANGO USER (USERNAME = AD2423695)
         # =============================
-        username = f"{passport_series}{passport_number}"
+        username = person.passport  # V1 birlashgan passport
 
         user, created = User.objects.get_or_create(
             username=username,
@@ -921,18 +917,10 @@ def get_current_user(request):
                 # Username'dan passport seriya va raqamni ajratish
                 username = request.user.username
 
-                # Passport seriya (birinchi 2 ta harf) va raqam (qolgan raqamlar)
-                import re
-                match = re.match(r'^([A-Z]{2})(.+)$', username)
-                if match:
-                    passport_series = match.group(1)
-                    passport_number = match.group(2)
-
-                    # Person topish
-                    person = Person.objects.filter(
-                        passport_series=passport_series,
-                        passport_number=passport_number
-                    ).first()
+                # Person topish passport bo'yicha (V1 birlashgan format)
+                person = Person.objects.filter(
+                    passport=username
+                ).first()
 
             # Rasm URL'ni olish
             if person and person.photo:
@@ -1237,30 +1225,33 @@ def upload_excel(request):
                     except:
                         pass
 
-                # Person yaratish yoki yangilash - BARCHA field'lar
+                # Person yaratish yoki yangilash - BARCHA field'lar (V1 format)
+                # Passport birlashtirilgan format: AB1234567
+                passport_full = None
+                if passport_series and passport_number:
+                    passport_full = f"{passport_series.strip().upper()}{str(int(passport_number)).strip()}"
+
                 person_data = {
                     'first_name': first_name,
                     'last_name': last_name,
                     'middle_name': middle_name,
-                    'passport_series': passport_series.strip(),
-                    'passport_number': int(passport_number.strip()),
+                    'passport': passport_full,  # V1 birlashgan format
                     'birth_date': birth_date,
                     'pinfl': pinfl,
                     'position': position,
-                    'district': district,
+                    'tuman': district,  # V1 da tuman
                     'department': department,
-                    'phone_number': phone_number,
+                    'phone': phone_number,  # V1 da phone
                     'mahalla': mahalla,
-                    'jeton_series': jeton_series,
+                    'badge_number': jeton_series,  # V1 da badge_number
                 }
 
                 # BIRINCHI: Person yaratish yoki yangilash (RASMISIZ)
-                # MUHIM: Passport seriya VA raqami bo'yicha tekshirish (ikkalasi birgalikda unique)
-                if passport_series and passport_number:
-                    # Passport seriya + raqam bo'yicha topish
+                # MUHIM: Passport bo'yicha tekshirish (V1 da unique)
+                if passport_full:
+                    # Passport bo'yicha topish
                     person, created = Person.objects.update_or_create(
-                        passport_series=passport_series,
-                        passport_number=passport_number,
+                        passport=passport_full,
                         defaults=person_data
                     )
                 elif pinfl:
@@ -1426,9 +1417,9 @@ def upload_excel(request):
                     print(f"  👤 Qator {index + 2}: Admin User yaratilmoqda...")
                     from django.contrib.auth.models import User
 
-                    # USERNAME: passport_series + passport_number (masalan: AD3145734)
-                    if passport_series and passport_number:
-                        username = f"{passport_series}{passport_number}"
+                    # USERNAME: passport (V1 birlashgan format, masalan: AD3145734)
+                    if passport_full:
+                        username = passport_full
                     else:
                         # Fallback - agar passport bo'lmasa, person ID ishlatamiz
                         username = f"person_{person.id}"
@@ -1870,8 +1861,7 @@ def person_crud_api(request):
                     Q(first_name__icontains=search) |
                     Q(last_name__icontains=search) |
                     Q(middle_name__icontains=search) |
-                    Q(passport_series__icontains=search) |
-                    Q(passport_number__icontains=search) |
+                    Q(passport__icontains=search) |  # V1 birlashgan passport
                     Q(pinfl__icontains=search)
                 )
 
@@ -1977,34 +1967,34 @@ def person_crud_api(request):
                             'error': f'Bu PINFL ({pinfl_value}) allaqachon "{existing_person.full_name}" foydalanuvchisiga tegishli'
                         }, status=400)
                 
-                # PASSPORT unique tekshirish
+                # PASSPORT unique tekshirish (V1 birlashgan format)
                 passport_series = data.get('passport_series', '').strip()
                 passport_number = data.get('passport_number', '').strip()
+                passport_full = None
                 if passport_series and passport_number:
+                    passport_full = f"{passport_series.upper()}{passport_number}"
                     existing_person = Person.objects.filter(
-                        passport_series=passport_series,
-                        passport_number=passport_number
+                        passport=passport_full
                     ).first()
                     if existing_person:
                         return JsonResponse({
                             'success': False,
-                            'error': f'Bu passport ({passport_series} {passport_number}) allaqachon "{existing_person.full_name}" foydalanuvchisiga tegishli'
+                            'error': f'Bu passport ({passport_full}) allaqachon "{existing_person.full_name}" foydalanuvchisiga tegishli'
                         }, status=400)
 
-                # Create person object
+                # Create person object (V1 format)
                 person = Person()
                 person.first_name = data.get('first_name', '').strip()
                 person.last_name = data.get('last_name', '').strip()
                 person.middle_name = data.get('middle_name', '').strip() or None
-                person.passport_series = data.get('passport_series', '').strip() or None
-                person.passport_number = data.get('passport_number', '').strip() or None
+                person.passport = passport_full  # V1 birlashgan format
                 person.pinfl = pinfl_value or None
                 person.position = data.get('position', '').strip() or None
-                person.district = data.get('district', '').strip() or None
+                person.tuman = data.get('district', '').strip() or None  # V1 da tuman
                 person.department = data.get('department', '').strip() or None
-                person.phone_number = data.get('phone_number', '').strip() or None
+                person.phone = data.get('phone_number', '').strip() or None  # V1 da phone
                 person.mahalla = data.get('mahalla', '').strip() or None
-                person.jeton_series = data.get('jeton_series', '').strip() or None
+                person.badge_number = data.get('jeton_series', '').strip() or None  # V1 da badge_number
 
                 # Birth date
                 if data.get('birth_date'):
@@ -2121,24 +2111,26 @@ def person_crud_api(request):
                 person.last_name = data['last_name'].strip()
             if 'middle_name' in data:
                 person.middle_name = data['middle_name'].strip() or None
-            if 'passport_series' in data:
-                person.passport_series = data['passport_series'].strip() or None
-            if 'passport_number' in data:
-                person.passport_number = data['passport_number'].strip() or None
+            # Passport yangilash (V1 birlashgan format)
+            if 'passport_series' in data or 'passport_number' in data:
+                passport_series = data.get('passport_series', '').strip()
+                passport_number = data.get('passport_number', '').strip()
+                if passport_series and passport_number:
+                    person.passport = f"{passport_series.upper()}{passport_number}"
             if 'pinfl' in data:
                 person.pinfl = data['pinfl'].strip() or None
             if 'position' in data:
                 person.position = data['position'].strip() or None
             if 'district' in data:
-                person.district = data['district'].strip() or None
+                person.tuman = data['district'].strip() or None  # V1 da tuman
             if 'department' in data:
                 person.department = data['department'].strip() or None
             if 'phone_number' in data:
-                person.phone_number = data['phone_number'].strip() or None
+                person.phone = data['phone_number'].strip() or None  # V1 da phone
             if 'mahalla' in data:
                 person.mahalla = data['mahalla'].strip() or None
             if 'jeton_series' in data:
-                person.jeton_series = data['jeton_series'].strip() or None
+                person.badge_number = data['jeton_series'].strip() or None  # V1 da badge_number
 
             # Birth date
             if 'birth_date' in data:
