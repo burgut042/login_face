@@ -159,24 +159,18 @@ class Person(models.Model):
         verbose_name="Ro'yxatdan o'tgan vaqt",
     )
 
-    # === V1 fields ===
-    external_person_id = models.CharField(
-        max_length=255,
+    # === V1 timestamp fields ===
+    # Note: external_person_id removed - not in actual v1 database
+    created_at = models.DateTimeField(
         null=True,
         blank=True,
-        db_column='external_person_id',
-        verbose_name="Tashqi API ID",
-        help_text="Person API dagi ID"
-    )
-
-    created_at = models.DateTimeField(
-        auto_now_add=True,
         db_column='created_at',
         verbose_name="Yaratilgan vaqt"
     )
 
     updated_at = models.DateTimeField(
-        auto_now=True,
+        null=True,
+        blank=True,
         db_column='updated_at',
         verbose_name="O'zgartirilgan vaqt"
     )
