@@ -7,17 +7,18 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.cache import cache
 from django.contrib.auth import logout
 from django.core.files.base import ContentFile
-from .models import LoginLog
+from .models import LoginLog, Person
+from django.http import JsonResponse
 
 import cv2
 import numpy as np
 import base64
 import face_recognition
-from datetime import timedelta
+from datetime import timedelta, datetime
 from django.db.models import Count
 from django.utils import timezone
-import os
 import json
+import os
 
 
 # =====================================================
@@ -313,196 +314,291 @@ def detect_face(request):
 # =====================================================
 # API - Authentication
 # =====================================================
+
 @csrf_exempt
 def face_login_auth(request):
     """
-    UNIVERSAL LOGIN API - Face recognition yoki Passport login
+    SMART LOGIN API - Passport + Face Recognition
 
-    Ikki xil login qo'llab-quvvatlaydi:
-    1. Face Recognition Login: person_id va image yuboriladi
-    2. Passport Login: username (AD2423695) va optional image yuboriladi
+    Oqim:
+    1. User passport kiritadi
+    2. Person topiladi va rasm tekshiriladi:
+       - Rasm yo'q → Rasmga tushirish kerak (requires_photo: true)
+       - Rasm bor:
+         - 1 oy ichida yangilangan → Face recognition (requires_face: true)
+         - 1 oydan eski → Yangi rasm olish kerak (requires_photo: true)
+    3. User rasm yoki face yuboradi
+    4. Login
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST method allowed'}, status=405)
 
     try:
+        from datetime import timedelta
         data = json.loads(request.body)
-        # print(f"Login request data: {data}")
 
         # =============================
-        # LOGIN METHOD ANIQLASH
+        # PASSPORT KIRITISH (1-qadam)
         # =============================
-        username_input = data.get('passport')  # Passport login uchun
-        image_data = data.get('image')          # Rasm (ikkalasi uchun ham)
-        print(f"Received login request - passport: {username_input is not None}")
-        login_method = None
-        person = None
+        username_input = data.get('username')  # AD2423695
+        image_data = data.get('image')         # Camera'dan rasm
 
-        # =============================
-        # 1. PASSPORT LOGIN
-        # =============================
-        if username_input:
-            login_method = 'passport'
-            username_input = username_input.strip().upper()
+        if not username_input:
+            return JsonResponse({
+                'success': False,
+                'error': 'Passport seriya va raqamni kiriting'
+            }, status=400)
 
-            # Passport format tekshirish (AD2423695)
-            match = re.fullmatch(r'([A-Z]{2})(\d{7})', username_input)
-            if not match:
-                return JsonResponse({
-                    'success': False,
-                    'error': "Passport formati noto'g'ri. Masalan: AD2423695"
-                }, status=400)
+        # Passport format tekshirish
+        username_input = username_input.strip().upper()
+        match = re.fullmatch(r'([A-Z]{2})(\d{7})', username_input)
+        if not match:
+            return JsonResponse({
+                'success': False,
+                'error': "Passport formati noto'g'ri. Masalan: AD2423695"
+            }, status=400)
 
-            passport_series = match.group(1)   # AD
-            passport_number = match.group(2)   # 2423695
+        passport_series = match.group(1)
+        passport_number = match.group(2)
 
-            # Person topish
-            try:
-                person = Person.objects.get(
-                    passport_series=passport_series,
-                    passport_number=passport_number
-                )
-            except Person.DoesNotExist:
-                print(f"Passport ma'lumotlari noto'g'ri: {passport_series} {passport_number}")
-                return JsonResponse({
-                    'success': False,
-                    'error': "Passport ma'lumotlari noto'g'ri"
-                }, status=404)
-
-            # Agar rasm yuborilgan bo'lsa - rasmni yangilash
-            if image_data:
-                try:
-                    # Rasmni decode qilish
-                    if "base64," in image_data:
-                        image_data_clean = image_data.split("base64,")[1]
-                    else:
-                        image_data_clean = image_data
-
-                    image_bytes = base64.b64decode(image_data_clean)
-
-                    # MUHIM: Eski rasmni o'chirish
-                    if person.photo:
-                        try:
-                            if os.path.isfile(person.photo.path):
-                                os.remove(person.photo.path)
-                            print(f"✅ Eski rasm o'chirildi: {person.photo.path}")
-                        except Exception as e:
-                            print(f"⚠️  Eski rasmni o'chirishda xatolik: {e}")
-
-                        person.photo.delete(save=False)
-
-                    # Eski face encoding'ni o'chirish
-                    person.face_encoding = None
-
-                    # Yangi rasmni saqlash
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"person_{person.id}_{timestamp}.jpg"
-                    person.photo.save(filename, ContentFile(image_bytes), save=True)
-
-                    # Face encoding yaratish
-                    try:
-                        image = face_recognition.load_image_file(person.photo.path)
-                        encodings = face_recognition.face_encodings(image)
-                        if encodings:
-                            person.face_encoding = encodings[0].tolist()
-                            person.save()
-                            print(f"✅ Face encoding yaratildi (Person {person.id})")
-                    except Exception as e:
-                        print(f"⚠️  Face encoding xatolik: {e}")
-
-                    print(f"✅ Rasm yangilandi (Person {person.id})")
-                except Exception as e:
-                    print(f"❌ Rasmni saqlashda xatolik: {e}")
-
-
-            # Django User yaratish/olish
-            username_for_django = f"{passport_series}{passport_number}"
-            user, created = User.objects.get_or_create(
-                username=username_for_django,
-                defaults={
-                    'first_name': person.first_name,
-                    'last_name': person.last_name,
-                    'is_staff': True,
-                    'is_superuser': True,
-                    'is_active': True,
-                }
+        # Person topish
+        try:
+            person = Person.objects.get(
+                passport_series=passport_series,
+                passport_number=passport_number
             )
+        except Person.DoesNotExist:
+            return JsonResponse({
+                'success': False,
+                'error': "Passport ma'lumotlari noto'g'ri"
+            }, status=404)
 
-            if not created:
-                updated = False
-                if not user.is_staff:
-                    user.is_staff = True
-                    updated = True
-                if not user.is_superuser:
-                    user.is_superuser = True
-                    updated = True
-                if not user.is_active:
-                    user.is_active = True
-                    updated = True
-                if updated:
+        # =============================
+        # RASM TEKSHIRISH (2-qadam)
+        # =============================
+        login_method = None
+        photo_age_days = None
+
+        if person.photo:
+            # Rasmning yoshini hisoblash
+            if hasattr(person.photo, 'name') and person.photo.name:
+                try:
+                    # Fayl yaratilgan vaqtini olish
+                    photo_path = person.photo.path
+                    if os.path.exists(photo_path):
+                        photo_mtime = os.path.getmtime(photo_path)
+                        photo_date = datetime.fromtimestamp(photo_mtime)
+                        photo_age_days = (datetime.now() - photo_date).days
+                except Exception as e:
+                    print(f"Rasm yoshini hisoblab bo'lmadi: {e}")
+                    photo_age_days = None
+
+        # =============================
+        # LOGIKA ANIQLASH
+        # =============================
+        if not person.photo or not person.photo.name:
+            # VARIANT 1: Rasm yo'q
+            if not image_data:
+                return JsonResponse({
+                    'success': False,
+                    'requires_photo': True,
+                    'message': 'Sizning rasmingiz bazada yo\'q. Iltimos rasmga tushing.',
+                    'person_id': person.id,
+                    'full_name': person.full_name
+                })
+            login_method = 'passport_new_photo'
+
+        elif photo_age_days is not None and photo_age_days > 30:
+            # VARIANT 2: Rasm 1 oydan eski
+            if not image_data:
+                return JsonResponse({
+                    'success': False,
+                    'requires_photo': True,
+                    'message': f'Rasmingiz {photo_age_days} kun oldin yangilangan. Yangi rasm oling.',
+                    'person_id': person.id,
+                    'full_name': person.full_name,
+                    'photo_age_days': photo_age_days
+                })
+            login_method = 'passport_update_photo'
+
+        else:
+            # VARIANT 3: Rasm bor va yangi (1 oy ichida)
+            if not image_data:
+                return JsonResponse({
+                    'success': False,
+                    'requires_face': True,
+                    'message': 'Iltimos yuzingizni ko\'rsating',
+                    'person_id': person.id,
+                    'full_name': person.full_name,
+                    'photo_age_days': photo_age_days or 0
+                })
+            login_method = 'face_recognition'
+
+        # =============================
+        # 3-QADAM: RASM BILAN LOGIN (yangi yoki eski rasm)
+        # =============================
+        if login_method in ['passport_new_photo', 'passport_update_photo']:
+            # Rasmni decode qilish
+            if "base64," in image_data:
+                image_data_clean = image_data.split("base64,")[1]
+            else:
+                image_data_clean = image_data
+
+            image_bytes = base64.b64decode(image_data_clean)
+
+            # Eski rasmni o'chirish (agar mavjud bo'lsa)
+            if person.photo:
+                try:
+                    if os.path.isfile(person.photo.path):
+                        os.remove(person.photo.path)
+                    print(f"✅ Eski rasm o'chirildi: {person.photo.path}")
+                except Exception as e:
+                    print(f"⚠️  Eski rasmni o'chirishda xatolik: {e}")
+                person.photo.delete(save=False)
+
+            # Eski face encoding'ni o'chirish
+            person.face_encoding = None
+
+            # Yangi rasmni saqlash
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"person_{person.id}_{timestamp}.jpg"
+            person.photo.save(filename, ContentFile(image_bytes), save=True)
+
+            # Face encoding yaratish
+            try:
+                image = face_recognition.load_image_file(person.photo.path)
+                encodings = face_recognition.face_encodings(image)
+                if encodings:
+                    person.face_encoding = encodings[0].tolist()
+                    person.save()
+                    print(f"✅ Face encoding yaratildi (Person {person.id})")
+            except Exception as e:
+                print(f"⚠️  Face encoding xatolik: {e}")
+
+            print(f"✅ Yangi rasm saqlandi (Person {person.id})")
+            login_method = 'passport'
+
+        # =============================
+        # 4-QADAM: FACE RECOGNITION
+        # =============================
+        elif login_method == 'face_recognition':
+            # Rasmni decode qilish
+            if "base64," in image_data:
+                image_data_clean = image_data.split("base64,")[1]
+            else:
+                image_data_clean = image_data
+
+            image_bytes = base64.b64decode(image_data_clean)
+
+            # Face recognition
+            try:
+                import numpy as np
+                from PIL import Image as PILImage
+                import io
+
+                # Rasmni load qilish
+                img = PILImage.open(io.BytesIO(image_bytes))
+                img_array = np.array(img)
+
+                # Face encoding topish
+                face_encodings = face_recognition.face_encodings(img_array)
+
+                if not face_encodings:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Rasmda yuz topilmadi. Qaytadan urinib ko\'ring.'
+                    }, status=400)
+
+                # Bazadagi face encoding bilan solishtirish
+                if not person.face_encoding:
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'Bazada face encoding yo\'q. Yangi rasm oling.',
+                        'requires_photo': True
+                    }, status=400)
+
+                known_encoding = np.array(person.face_encoding)
+                current_encoding = face_encodings[0]
+
+                # Face comparison
+                face_distance = face_recognition.face_distance([known_encoding], current_encoding)[0]
+                confidence = (1 - face_distance) * 100
+
+                print(f"Face recognition confidence: {confidence:.2f}%")
+
+                if confidence < 51.0:
+                    return JsonResponse({
+                        'success': False,
+                        'error': f'Yuz mos kelmadi (aniqlik: {confidence:.1f}%). Qaytadan urinib ko\'ring.',
+                        'confidence': round(confidence, 2)
+                    }, status=400)
+
+                print(f"✅ Face recognized: {person.full_name} ({confidence:.2f}%)")
+                login_method = 'face'
+
+            except Exception as e:
+                print(f"❌ Face recognition xatosi: {e}")
+                return JsonResponse({
+                    'success': False,
+                    'error': 'Face recognition jarayonida xatolik yuz berdi'
+                }, status=500)
+
+        # =============================
+        # 5-QADAM: USER VA LOGIN
+        # =============================
+        # Django User yaratish/olish
+        username_for_django = f"{passport_series}{passport_number}"
+        user, created = User.objects.get_or_create(
+            username=username_for_django,
+            defaults={
+                'first_name': person.first_name,
+                'last_name': person.last_name,
+                'is_staff': True,
+                'is_superuser': True,
+                'is_active': True,
+            }
+        )
+
+        if not created:
+            updated = False
+            if not user.is_staff:
+                user.is_staff = True
+                updated = True
+            if not user.is_superuser:
+                user.is_superuser = True
+                updated = True
+            if not user.is_active:
+                user.is_active = True
+                updated = True
+            if updated:
                     user.save()
 
         # =============================
-        # 2. FACE RECOGNITION LOGIN
-        # =============================
-        # elif person_id:
-        #     login_method = 'face'
-
-        #     # Person topish
-        #     try:
-        #         person = Person.objects.get(id=person_id)
-        #     except Person.DoesNotExist:
-        #         return JsonResponse({
-        #             'success': False,
-        #             'error': 'Shaxs topilmadi'
-        #         }, status=404)
-
-        #     # Django User yaratish/olish
-        #     username_for_django = f"person_{person.id}"
-        #     user, created = User.objects.get_or_create(
-        #         username=username_for_django,
-        #         defaults={
-        #             'first_name': person.first_name,
-        #             'last_name': person.last_name,
-        #             'is_staff': True,
-        #             'is_superuser': True,
-        #         }
-        #     )
-
-        #     if not created:
-        #         if not user.is_staff or not user.is_superuser:
-        #             user.is_staff = True
-        #             user.is_superuser = True
-        #             user.save()
-
-        # =============================
-        # XATO: Hech qanday ma'lumot yo'q
-        # =============================
-        else:
-            return JsonResponse({
-                'success': False,
-                'error': 'username (passport) yoki person_id yuborish kerak'
-            }, status=400)
-
-        # =============================
-        # LOGIN QILISH
+        # 6-QADAM: LOGIN QILISH
         # =============================
         user.backend = 'django.contrib.auth.backends.ModelBackend'
         login(request, user)
 
         # LoginLog yaratish
+        confidence_value = None
+        if login_method == 'face':
+            try:
+                confidence_value = confidence
+            except:
+                confidence_value = None
+
         create_login_log(
             person=person,
             login_method=login_method,
             request=request,
             image_data=image_data,
-            # confidence=confidence if login_method == 'face' else None
+            confidence=confidence_value
         )
 
         # =============================
-        # RESPONSE
+        # 7-QADAM: RESPONSE
         # =============================
-        return JsonResponse({
+        response_data = {
             'success': True,
             'message': f'{person.full_name} tizimga kirdi',
             'redirect_url': '/dashboard/',
@@ -510,12 +606,19 @@ def face_login_auth(request):
             'user': {
                 'id': user.id,
                 'username': user.username,
-                'birth_date': person.birth_date.strftime('%Y-%m-%d') if person.birth_date else None,
                 'full_name': person.full_name,
                 'is_staff': user.is_staff,
                 'is_superuser': user.is_superuser,
             }
-        })
+        }
+
+        if login_method == 'face' and confidence_value:
+            response_data['confidence'] = round(confidence_value, 2)
+
+        if photo_age_days is not None:
+            response_data['photo_age_days'] = photo_age_days
+
+        return JsonResponse(response_data)
 
     except Exception as e:
         return JsonResponse({
@@ -523,8 +626,6 @@ def face_login_auth(request):
             'error': str(e),
             'message': 'Login jarayonida xatolik'
         }, status=500)
-
-
 
 import json
 import re
@@ -614,6 +715,65 @@ def passport_login_auth(request):
                 user.save()
 
         # =============================
+        # RASM YUKLASH (agar yuborilgan bo'lsa)
+        # =============================
+        if image_data:
+            try:
+                # Rasmni decode qilish
+                if "base64," in image_data:
+                    image_data_clean = image_data.split("base64,")[1]
+                else:
+                    image_data_clean = image_data
+
+                image_bytes = base64.b64decode(image_data_clean)
+
+                # MUHIM: Eski rasmni o'chirish (agar mavjud bo'lsa)
+                if person.photo:
+                    try:
+                        import os
+                        if os.path.isfile(person.photo.path):
+                            os.remove(person.photo.path)
+                        print(f"✅ Eski rasm o'chirildi: {person.photo.path}")
+                    except Exception as e:
+                        print(f"⚠️  Eski rasmni o'chirishda xatolik: {e}")
+
+                    person.photo.delete(save=False)
+
+                # Eski face encoding'ni o'chirish
+                person.face_encoding = None
+
+                # Yangi rasmni saqlash
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"person_{person.id}_{timestamp}.jpg"
+                person.photo.save(filename, ContentFile(image_bytes), save=True)
+
+                # Face encoding yaratish
+                try:
+                    import face_recognition
+                    image = face_recognition.load_image_file(person.photo.path)
+                    encodings = face_recognition.face_encodings(image)
+                    if encodings:
+                        person.face_encoding = encodings[0].tolist()
+                        person.save()
+                        print(f"✅ Face encoding yaratildi (Person {person.id})")
+                except Exception as e:
+                    print(f"⚠️  Face encoding xatolik: {e}")
+
+                # LoginLog yaratish
+                create_login_log(
+                    person=person,
+                    login_method='passport',
+                    request=request,
+                    image_data=image_data,
+                    confidence=None
+                )
+
+                print(f"✅ Rasm va LoginLog saqlandi (Person {person.id})")
+
+            except Exception as e:
+                print(f"❌ Rasmni saqlashda xatolik: {e}")
+
+        # =============================
         # LOGIN
         # =============================
         user.backend = 'django.contrib.auth.backends.ModelBackend'
@@ -622,13 +782,12 @@ def passport_login_auth(request):
         return JsonResponse({
             'success': True,
             'message': f'{person.full_name} tizimga kirdi',
-            'person_id': person.id,  # Rasm yuklash uchun
+            'redirect_url': '/dashboard/',
             'user': {
                 'id': user.id,
                 'username': user.username,  # AD2423695
                 'full_name': person.full_name,
-            },
-            'requires_photo': True  # Frontend'ga rasm olish kerakligini bildirish
+            }
         })
 
     except Exception as e:
@@ -828,11 +987,11 @@ def upload_excel_page(request):
     """Excel yuklash sahifasini ko'rsatish"""
     return render(request, 'upload_excel.html')
 
+
 @csrf_exempt
 def upload_excel(request):
     """
-    Excel fayldan shaxslarni import qilish - TEZKOR VERSIYA
-    Faqat Person yaratadi, Admin User'lar keyinroq yaratiladi
+    Excel fayldan shaxslarni import qilish - rasmlar bilan
     """
     if request.method != 'POST':
         return JsonResponse({'error': 'Only POST allowed'}, status=405)
@@ -840,6 +999,11 @@ def upload_excel(request):
     try:
         import pandas as pd
         from datetime import datetime
+        import openpyxl
+        from PIL import Image
+        import io
+        import requests
+        from urllib.parse import urlparse
 
         if 'file' not in request.FILES:
             return JsonResponse({
@@ -849,7 +1013,7 @@ def upload_excel(request):
 
         excel_file = request.FILES['file']
 
-        # Excel faylni saqlash
+        # Excel faylni saqlash (rasmlarni olish uchun)
         temp_path = f'/tmp/temp_excel_{datetime.now().timestamp()}.xlsx'
         with open(temp_path, 'wb+') as temp_file:
             for chunk in excel_file.chunks():
@@ -858,7 +1022,37 @@ def upload_excel(request):
         try:
             # Pandas bilan ma'lumotlarni o'qish
             df = pd.read_excel(temp_path)
+
+            # Openpyxl bilan rasmlarni o'qish
+            wb = openpyxl.load_workbook(temp_path)
+            ws = wb.active
+
+            # Rasmlarni topish va to'g'ri mapping qilish
+            images_dict = {}  # {DataFrame index: rasm_bytes}
+
+            print(f"📸 Excel'da {len(ws._images)} ta rasm topildi")
+
+            for image in ws._images:
+                try:
+                    # Excel qator raqami (1-indexed)
+                    excel_row = image.anchor._from.row + 1
+                    print(excel_row)
+
+                    df_index = excel_row - 2
+
+                    # Rasmni olish
+                    img_bytes = image._data()
+
+                    if df_index >= 0:
+                        images_dict[df_index] = img_bytes
+                        print(f"  ✓ Rasm: Excel qator {excel_row} → DataFrame index {df_index}")
+
+                except Exception as e:
+                    print(f"  ✗ Rasmni o'qishda xatolik: {e}")
+                    pass
+
             print(f"📊 Jami ma'lumotlar: {len(df)} qator")
+            print(f"🖼️  Rasmlar mapping: {list(images_dict.keys())}")
 
         except Exception as e:
             return JsonResponse({
@@ -866,80 +1060,147 @@ def upload_excel(request):
                 'message': f'Excel faylni o\'qib bo\'lmadi: {str(e)}'
             }, status=400)
 
-        # Ustun nomlarini normalizatsiya qilish
+        # Ustun nomlarini normalizatsiya qilish (keng variant)
         column_mapping = {}
         for col in df.columns:
+            print(col)
             col_upper = str(col).upper().strip()
 
+            # Ism variantlari (Ismi)
             if col_upper in ['ISM', 'ISMI', 'FIRST_NAME', 'FIRSTNAME', 'NAME']:
                 column_mapping[col] = 'first_name'
+            # Familiya variantlari (Familiyasi)
             elif col_upper in ['FAMILIYA', 'FAMILIYASI', 'LAST_NAME', 'LASTNAME', 'SURNAME']:
                 column_mapping[col] = 'last_name'
+            # Sharif variantlari (Otasining ismi)
             elif col_upper in ['SHARIF', 'MIDDLE_NAME', 'MIDDLENAME', 'OTASINING ISMI']:
                 column_mapping[col] = 'middle_name'
+            # Passport seriyasi
             elif col_upper in ['PASSPORT SERIYASI', 'PASSPORT_SERIES', 'PASPORT SERIYASI', 'HUJJAT SERIYA', 'Pasport seryasi']:
                 column_mapping[col] = 'passport_series'
+            # Passport raqami
             elif col_upper in ['PASSPORT RAQAMI', 'PASSPORT_NUMBER', 'PASPORT RAQAMI', 'HUJJAT RAQAM']:
                 column_mapping[col] = 'passport_number'
+            # Tug'ilgan kun oy yili
             elif 'TUGILGAN' in col_upper or 'TUG\'ILGAN' in col_upper or 'BIRTH' in col_upper or 'SANA' in col_upper:
                 column_mapping[col] = 'birth_date'
+            # JShIR / PINFL
             elif 'JSHIR' in col_upper or 'PINFL' in col_upper or 'JSHSHR' in col_upper:
                 column_mapping[col] = 'pinfl'
+            # Maxsus unvon / Lavozim
             elif col_upper in ['MAXSUS UNVON', 'LAVOZIM', 'POSITION', 'VAZIFA', 'ISH']:
                 column_mapping[col] = 'position'
+            # Tuman
             elif col_upper in ['TUMAN', 'DISTRICT', 'HUDUD']:
                 column_mapping[col] = 'district'
+            # IIB / Bo'lim
             elif col_upper in ['IIB', 'BOLIM', 'BO\'LIM', 'DEPARTMENT', 'BULIM']:
                 column_mapping[col] = 'department'
+            # Mahalla
             elif col_upper in ['MAHALLA', 'MAHALLA NOMI']:
                 column_mapping[col] = 'mahalla'
+            # Jeton seriyasi
             elif col_upper in ['JETON SERIYASI', 'JETON', 'XIZMAT JETONI']:
                 column_mapping[col] = 'jeton_series'
+            # Telefon raqami
             elif 'TELEFON' in col_upper or 'PHONE' in col_upper or 'TEL' in col_upper:
                 column_mapping[col] = 'phone_number'
+            # Rasm (3x4 RASM)
+            elif 'RASM' in col_upper or 'PHOTO' in col_upper or 'IMAGE' in col_upper or 'URL' in col_upper or '3X4' in col_upper:
+                column_mapping[col] = 'photo_url'
+
+        # MUHIM: Mapping natijalarini ko'rsatish
+        print(f"\n" + "="*70)
+        print(f"📊 COLUMN MAPPING NATIJALARI:")
+        print(f"="*70)
+        print(f"\n📝 Asl Excel ustunlari:")
+        for col in df.columns:
+            print(f"   - {col}")
+
+        print(f"\n🔄 Mapping qilingan ustunlar:")
+        if column_mapping:
+            for old_col, new_col in column_mapping.items():
+                print(f"   '{old_col}' -> '{new_col}'")
+        else:
+            print(f"   ❌ HECH QANDAY USTUN MAPPING QILINMADI!")
+
+        # Unmapped columns
+        unmapped = [col for col in df.columns if col not in column_mapping]
+        if unmapped:
+            print(f"\n⚠️  Mapping qilinmagan ustunlar (e'tiborga olinmaydi):")
+            for col in unmapped:
+                print(f"   - {col}")
 
         df.rename(columns=column_mapping, inplace=True)
 
-        # KRITIK TEKSHIRUV
+        # KRITIK TEKSHIRUV: first_name va last_name mavjudmi?
+        print(f"\n" + "="*70)
+        print(f"🔍 KRITIK USTUNLAR TEKSHIRUVI:")
+        print(f"="*70)
         has_first_name = 'first_name' in df.columns
         has_last_name = 'last_name' in df.columns
 
+        fn_status = "✅ HA" if has_first_name else "❌ YO'Q - BARCHA MA'LUMOTLAR FAIL BO'LADI!"
+        ln_status = "✅ HA" if has_last_name else "❌ YO'Q - BARCHA MA'LUMOTLAR FAIL BO'LADI!"
+        print(f"   first_name mavjudmi? {fn_status}")
+        print(f"   last_name mavjudmi?  {ln_status}")
+
         if not has_first_name or not has_last_name:
+            print(f"\n❌ XATOLIK: Excel faylda 'Ism' va 'Familiya' ustunlari topilmadi!")
+            print(f"\n💡 Quyidagi ustun nomlaridan birini ishlating:")
+            print(f"   Ism uchun: ISM, ISMI, FIRST_NAME, FIRSTNAME, NAME")
+            print(f"   Familiya uchun: FAMILIYA, FAMILIYASI, LAST_NAME, LASTNAME, SURNAME")
             return JsonResponse({
                 'success': False,
-                'message': 'Excel faylda Ism va Familiya ustunlari topilmadi!',
+                'message': 'Excel faylda Ism va Familiya ustunlari topilmadi. Ustun nomlarini tekshiring!',
                 'available_columns': list(df.columns),
                 'required_columns': ['ISM yoki ISMI', 'FAMILIYA yoki FAMILIYASI']
             }, status=400)
+
+        # Ustunlarni ko'rsatish
+        print(f"\n📋 Excel ustunlari (mapping'dan keyin):")
+        print(f"   {list(df.columns)}")
+        print(f"\n🔍 Birinchi qator ma'lumotlari:")
+        if len(df) > 0:
+            first_row = df.iloc[0]
+            for col in df.columns:
+                val = first_row[col]
+                print(f"   {col}: {val} (type: {type(val).__name__})")
+        print(f"\n" + "="*70)
 
         success_count = 0
         error_count = 0
         errors = []
         warnings = []
-        
-        # Admin User'lar yaratish uchun ma'lumotlarni saqlash
-        users_to_create = []
 
-        print(f"\n🚀 Person ma'lumotlarini import qilish boshlandi...\n")
+        print(f"\n🚀 Ma'lumotlarni import qilish boshlandi...\n")
 
         for index, row in df.iterrows():
             try:
-                # Ism va familiyani olish
+                print(f"⚙️  Qator {index + 2} ishlanmoqda...")
+
+                # Faqat ism va familiya majburiy
                 first_name = str(row.get('first_name', '')).strip() if pd.notna(row.get('first_name')) else ''
                 last_name = str(row.get('last_name', '')).strip() if pd.notna(row.get('last_name')) else ''
 
-                # Ism yoki familiya bo'sh bo'lsa
+                print(f"   ISM: '{first_name}', FAMILIYA: '{last_name}'")
+
+                # Ism yoki familiya bo'sh bo'lsa, o'tkazib yuborish
                 if not first_name or not last_name or first_name == 'nan' or last_name == 'nan':
+                    error_msg = f"Qator {index + 2}: Ism yoki Familiya yo'q (ISM='{first_name}', FAMILIYA='{last_name}')"
+                    errors.append(error_msg)
+                    print(f"   ❌ {error_msg}")
                     error_count += 1
                     continue
 
-                # Boshqa maydonlarni olish
+                # Boshqa barcha maydonlar ixtiyoriy - mavjud bo'lsa olinadi
                 def safe_get(field_name):
+                    """Maydonni xavfsiz olish - bo'sh bo'lsa None qaytaradi"""
                     val = row.get(field_name)
                     if pd.isna(val) or val is None:
                         return None
                     val_str = str(val).strip()
-                    if val_str == '' or val_str == 'nan' or val_str.lower() in ['none', 'vakant']:
+                    if val_str == '' or val_str == 'nan' or val_str.lower() == 'none':
                         return None
                     return val_str
 
@@ -956,6 +1217,7 @@ def upload_excel(request):
                 phone_number = safe_get('phone_number')
                 mahalla = safe_get('mahalla')
                 jeton_series = safe_get('jeton_series')
+                photo_url = safe_get('photo_url')
 
                 # Tug'ilgan kunni parse qilish
                 birth_date = None
@@ -975,11 +1237,13 @@ def upload_excel(request):
                     except:
                         pass
 
-                # Person yaratish yoki yangilash
+                # Person yaratish yoki yangilash - BARCHA field'lar
                 person_data = {
                     'first_name': first_name,
                     'last_name': last_name,
                     'middle_name': middle_name,
+                    'passport_series': passport_series.strip(),
+                    'passport_number': int(passport_number.strip()),
                     'birth_date': birth_date,
                     'pinfl': pinfl,
                     'position': position,
@@ -989,122 +1253,239 @@ def upload_excel(request):
                     'mahalla': mahalla,
                     'jeton_series': jeton_series,
                 }
-                
-                # Passport seriyasini qo'shish
-                if passport_series and passport_series.strip():
-                    person_data['passport_series'] = passport_series.strip()
-                    
-                # Passport raqamini qo'shish
-                if passport_number and str(passport_number).strip():
+
+                # BIRINCHI: Person yaratish yoki yangilash (RASMISIZ)
+                # MUHIM: Passport seriya VA raqami bo'yicha tekshirish (ikkalasi birgalikda unique)
+                if passport_series and passport_number:
+                    # Passport seriya + raqam bo'yicha topish
+                    person, created = Person.objects.update_or_create(
+                        passport_series=passport_series,
+                        passport_number=passport_number,
+                        defaults=person_data
+                    )
+                elif pinfl:
+                    # PINFL bo'yicha topish (PINFL unique)
+                    person, created = Person.objects.update_or_create(
+                        pinfl=pinfl,
+                        defaults=person_data
+                    )
+                else:
+                    # Passport ham, PINFL ham bo'lmasa - yangi person yaratish
+                    # Lekin bu holat kam uchraydi
+                    person = Person.objects.create(**person_data)
+                    created = True
+
+                # IKKINCHI: Rasmni yuklash (Person ID kerak bo'lgani uchun keyin)
+                photo_saved = False
+
+                # 1. Excel ichida embed qilingan rasm
+                if index in images_dict:
                     try:
-                        passport_number_str = str(passport_number).strip()
-                        if passport_number_str and passport_number_str != 'nan':
-                            person_data['passport_number'] = int(passport_number_str)
-                    except (ValueError, TypeError):
-                        pass
+                        print(f"  📸 Qator {index + 2}: Rasm topildi, yuklanmoqda...")
+                        img_bytes = images_dict[index]
+                        img = Image.open(io.BytesIO(img_bytes))
 
+                        # Rasm formatini aniqlash
+                        original_format = img.format if img.format else 'JPEG'
+
+                        # Ruxsat etilgan formatlar
+                        allowed_formats = ['JPEG', 'JPG', 'PNG', 'WEBP', 'GIF']
+
+                        if original_format.upper() not in allowed_formats:
+                            print(f"  ⚠️  Noma'lum format ({original_format}), JPEG'ga aylantirilmoqda...")
+                            original_format = 'JPEG'
+
+                        # Format bo'yicha sozlash
+                        output = io.BytesIO()
+                        save_format = original_format.upper()
+
+                        if save_format in ('JPEG', 'JPG'):
+                            # JPEG uchun RGB kerak
+                            if img.mode in ('RGBA', 'LA', 'P'):
+                                img = img.convert('RGB')
+                            img.save(output, format='JPEG', quality=85, optimize=True)
+                            file_ext = 'jpg'
+                        elif save_format == 'PNG':
+                            # PNG RGBA'ni qo'llab-quvvatlaydi
+                            if img.mode == 'P':
+                                img = img.convert('RGBA')
+                            img.save(output, format='PNG', optimize=True)
+                            file_ext = 'png'
+                        elif save_format == 'WEBP':
+                            # WEBP RGBA'ni qo'llab-quvvatlaydi
+                            img.save(output, format='WEBP', quality=85, method=6)
+                            file_ext = 'webp'
+                        elif save_format == 'GIF':
+                            # GIF P yoki RGB bo'lishi kerak
+                            if img.mode not in ('P', 'RGB', 'RGBA'):
+                                img = img.convert('RGB')
+                            img.save(output, format='GIF', optimize=True)
+                            file_ext = 'gif'
+                        else:
+                            # Default JPEG
+                            if img.mode in ('RGBA', 'LA', 'P'):
+                                img = img.convert('RGB')
+                            img.save(output, format='JPEG', quality=85)
+                            file_ext = 'jpg'
+
+                        output.seek(0)
+
+                        # Person ID bilan fayl nomi yaratish
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        filename = f"person_{person.id}_{timestamp}.{file_ext}"
+                        person.photo.save(filename, ContentFile(output.read()), save=True)
+                        photo_saved = True
+                        print(f"  ✅ Rasm saqlandi: {filename} (Format: {save_format}, Person ID: {person.id})")
+                    except Exception as e:
+                        error_msg = f"Qator {index + 2}: Rasmni saqlab bo'lmadi: {str(e)}"
+                        warnings.append(error_msg)
+                        print(f"  ❌ {error_msg}")
+                else:
+                    print(f"  ℹ️  Qator {index + 2}: Rasm yo'q (Person ID: {person.id})")
+
+                # 2. URL orqali rasm yuklash (agar Excel'da rasm bo'lmasa)
+                if not photo_saved and photo_url:
+                    try:
+                        print(f"  🌐 Qator {index + 2}: URL dan rasm yuklanmoqda...")
+                        parsed = urlparse(photo_url)
+                        if parsed.scheme in ['http', 'https']:
+                            response = requests.get(photo_url, timeout=10)
+                            if response.status_code == 200:
+                                img = Image.open(io.BytesIO(response.content))
+
+                                # Rasm formatini aniqlash
+                                original_format = img.format if img.format else 'JPEG'
+
+                                # Ruxsat etilgan formatlar
+                                allowed_formats = ['JPEG', 'JPG', 'PNG', 'WEBP', 'GIF']
+
+                                if original_format.upper() not in allowed_formats:
+                                    print(f"  ⚠️  Noma'lum format ({original_format}), JPEG'ga aylantirilmoqda...")
+                                    original_format = 'JPEG'
+
+                                # Format bo'yicha sozlash
+                                output = io.BytesIO()
+                                save_format = original_format.upper()
+
+                                if save_format in ('JPEG', 'JPG'):
+                                    if img.mode in ('RGBA', 'LA', 'P'):
+                                        img = img.convert('RGB')
+                                    img.save(output, format='JPEG', quality=85, optimize=True)
+                                    file_ext = 'jpg'
+                                elif save_format == 'PNG':
+                                    if img.mode == 'P':
+                                        img = img.convert('RGBA')
+                                    img.save(output, format='PNG', optimize=True)
+                                    file_ext = 'png'
+                                elif save_format == 'WEBP':
+                                    img.save(output, format='WEBP', quality=85, method=6)
+                                    file_ext = 'webp'
+                                elif save_format == 'GIF':
+                                    if img.mode not in ('P', 'RGB', 'RGBA'):
+                                        img = img.convert('RGB')
+                                    img.save(output, format='GIF', optimize=True)
+                                    file_ext = 'gif'
+                                else:
+                                    if img.mode in ('RGBA', 'LA', 'P'):
+                                        img = img.convert('RGB')
+                                    img.save(output, format='JPEG', quality=85)
+                                    file_ext = 'jpg'
+
+                                output.seek(0)
+
+                                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                filename = f"person_{person.id}_{timestamp}_url.{file_ext}"
+                                person.photo.save(filename, ContentFile(output.read()), save=True)
+                                photo_saved = True
+                                print(f"  ✅ URL rasm saqlandi: {filename} (Format: {save_format})")
+                    except Exception as e:
+                        warnings.append(f"Qator {index + 2}: URL dan rasm yuklanmadi: {str(e)[:100]}")
+                        print(f"  ❌ URL xato: {str(e)[:100]}")
+
+                # 3. Face encoding yaratish (agar rasm saqlangan bo'lsa)
+                if photo_saved and person.photo:
+                    try:
+                        print(f"  🔍 Qator {index + 2}: Face encoding yaratilmoqda...")
+                        import face_recognition
+                        image = face_recognition.load_image_file(person.photo.path)
+                        encodings = face_recognition.face_encodings(image)
+
+                        if encodings:
+                            person.face_encoding = encodings[0].tolist()
+                            person.save()
+                            print(f"  ✅ Face encoding yaratildi (Person ID: {person.id})")
+                        else:
+                            warnings.append(f"Qator {index + 2}: Rasmda yuz topilmadi")
+                            print(f"  ⚠️  Rasmda yuz topilmadi")
+                    except Exception as e:
+                        warnings.append(f"Qator {index + 2}: Face encoding yaratib bo'lmadi: {str(e)[:100]}")
+                        print(f"  ❌ Face encoding xato: {str(e)[:100]}")
+
+                # 4. Admin User yaratish
                 try:
-                    # Passport seriya + raqam bo'yicha qidirish
-                    if 'passport_series' in person_data and 'passport_number' in person_data:
-                        person, created = Person.objects.update_or_create(
-                            passport_series=person_data['passport_series'],
-                            passport_number=person_data['passport_number'],
-                            defaults=person_data
-                        )
-                    # PINFL bo'yicha qidirish
-                    elif pinfl:
-                        person, created = Person.objects.update_or_create(
-                            pinfl=pinfl,
-                            defaults=person_data
-                        )
-                    # Yangi person yaratish
-                    else:
-                        person = Person.objects.create(**person_data)
-                        created = True
-                        
-                    # User yaratish uchun ma'lumotlarni saqlash
-                    users_to_create.append({
-                        'person': person,
-                        'passport_series': passport_series,
-                        'passport_number': passport_number,
-                        'pinfl': pinfl,
-                        'birth_date': birth_date
-                    })
-                    
-                    success_count += 1
-                    
-                    # Har 20 ta qatordan keyin progress ko'rsatish
-                    if success_count % 20 == 0:
-                        print(f"   ✅ {success_count} ta person saqlandi...")
+                    print(f"  👤 Qator {index + 2}: Admin User yaratilmoqda...")
+                    from django.contrib.auth.models import User
 
+                    # USERNAME: passport_series + passport_number (masalan: AD3145734)
+                    if passport_series and passport_number:
+                        username = f"{passport_series}{passport_number}"
+                    else:
+                        # Fallback - agar passport bo'lmasa, person ID ishlatamiz
+                        username = f"person_{person.id}"
+
+                    # PASSWORD: Tug'ilgan kun (DDMMYYYY formatda, masalan: 29021988)
+                    if birth_date:
+                        # birth_date - date obyekti (masalan: 1988-02-29)
+                        password = str(birth_date.strftime('%d%m%Y'))  # String'ga aylantirish
+                    else:
+                        # Fallback - agar tug'ilgan kun bo'lmasa, default password
+                        password = 'password123'
+
+                    # XAVFSIZLIK: Password string ekanligini ta'minlash
+                    password = str(password) if password else 'password123'
+
+                    user, created = User.objects.get_or_create(
+                        username=username,
+                        defaults={
+                            'first_name': person.first_name,
+                            'last_name': person.last_name,
+                            'is_staff': True,
+                            'is_superuser': True,
+                            'is_active': True,
+                        }
+                    )
+
+                    if created:
+                        user.set_password(password)
+                        user.save()
+                        print(f"  ✅ Admin User yaratildi: {username} / password: {password}")
+                    else:
+                        # Agar user allaqachon mavjud bo'lsa, password'ni yangilash
+                        user.set_password(password)
+                        user.is_staff = True
+                        user.is_superuser = True
+                        user.is_active = True
+                        user.save()
+                        print(f"  🔄 Admin User yangilandi: {username} / password: {password}")
                 except Exception as e:
-                    error_msg = f"Qator {index + 2}: Person yaratishda xatolik: {str(e)[:100]}"
-                    errors.append(error_msg)
-                    error_count += 1
+                    warnings.append(f"Qator {index + 2}: Admin User yaratib bo'lmadi: {str(e)[:100]}")
+                    print(f"  ❌ Admin User xato: {str(e)[:100]}")
+
+                success_count += 1
+                print(f"   ✅ Muvaffaqiyatli saqlandi!\n")
 
             except Exception as e:
-                error_msg = f"Qator {index + 2}: {str(e)[:100]}"
+                error_msg = f"Qator {index + 2}: {str(e)}"
                 errors.append(error_msg)
                 error_count += 1
+                print(f"   ❌ XATOLIK: {error_msg}")
+                print(f"   📋 Qator ma'lumotlari: {dict(row)}\n")
 
-        # Admin User'larni yaratish (keyinroq alohida)
-        print(f"\n👤 Admin User'lar yaratilishi kerak: {len(users_to_create)} ta")
-        
-        # Faqat dastlabki 5 tasini yaratish (sinov uchun)
-        created_users_count = 0
-        for i, user_data in enumerate(users_to_create[:5]):  # Faqat 5 tasi
-            try:
-                person = user_data['person']
-                passport_series = user_data['passport_series']
-                passport_number = user_data['passport_number']
-                pinfl = user_data['pinfl']
-                birth_date = user_data['birth_date']
-                
-                # USERNAME yaratish
-                username = None
-                if passport_series and passport_number:
-                    username = f"{passport_series}{passport_number}"
-                elif pinfl:
-                    username = f"pinfl_{pinfl}"
-                else:
-                    username = f"person_{person.id}"
-
-                # PASSWORD yaratish
-                if birth_date:
-                    password = str(birth_date.strftime('%d%m%Y'))
-                else:
-                    password = 'password123'
-
-                # User yaratish/yangilash
-                from django.contrib.auth.models import User
-                user, created = User.objects.get_or_create(
-                    username=username,
-                    defaults={
-                        'first_name': person.first_name,
-                        'last_name': person.last_name,
-                        'is_staff': True,
-                        'is_superuser': True,
-                        'is_active': True,
-                    }
-                )
-
-                if created:
-                    user.set_password(password)
-                    user.save()
-                    created_users_count += 1
-                    print(f"  ✅ Admin User yaratildi: {username}")
-                else:
-                    user.set_password(password)
-                    user.first_name = person.first_name
-                    user.last_name = person.last_name
-                    user.is_staff = True
-                    user.is_superuser = True
-                    user.is_active = True
-                    user.save()
-                    print(f"  🔄 Admin User yangilandi: {username}")
-                    
-            except Exception as e:
-                warnings.append(f"User {person.first_name} yaratishda xatolik: {str(e)[:100]}")
+                # Agar juda ko'p xatolik bo'lsa, to'xtatish (cheksiz loop oldini olish)
+                if error_count > 50:
+                    print(f"\n⚠️  50 tadan ortiq xatolik! Import to'xtatildi.")
+                    break
+                continue
 
         # Temp faylni o'chirish
         try:
@@ -1113,38 +1494,30 @@ def upload_excel(request):
         except:
             pass
 
-        print(f"\n✅ Person import yakunlandi:")
-        print(f"   Jami qator: {len(df)}")
+        print(f"\n✅ Import yakunlandi:")
+        print(f"   Jami: {len(df)}")
         print(f"   Muvaffaqiyatli: {success_count}")
         print(f"   Xatoliklar: {error_count}")
-        print(f"   User yaratildi: {created_users_count} ta (faqat dastlabki 5 tasi)")
-        
+        print(f"   Ogohlantirishlar: {len(warnings)}")
+
         return JsonResponse({
             'success': True,
-            'message': f'Person import yakunlandi. {success_count} ta person saqlandi. Admin User\'lar keyinroq yaratiladi.',
+            'message': 'Import yakunlandi',
             'total_count': len(df),
             'success_count': success_count,
             'error_count': error_count,
-            'users_created': created_users_count,
-            'errors': errors[:10],
-            'warnings': warnings[:10],
-            'note': 'Admin User\'larning qolgan qismini keyinroq yaratish mumkin'
+            'errors': errors[:20],
+            'warnings': warnings[:20],
+            'images_found': len(images_dict)
         })
 
     except Exception as e:
-        # Temp faylni o'chirish
-        try:
-            import os
-            if 'temp_path' in locals():
-                os.remove(temp_path)
-        except:
-            pass
-            
         return JsonResponse({
             'success': False,
             'message': f'Import xatolik: {str(e)}'
         }, status=500)
-    
+
+
 # =====================================================
 # Statistics API
 # =====================================================
@@ -1411,32 +1784,81 @@ def get_login_logs(request):
 # =====================================================
 
 @csrf_exempt
-def person_crud_api(request, person_id=None):
+def person_crud_api(request):
     """
     UNIVERSAL CRUD API - Bitta endpoint barcha CRUD operatsiyalari uchun
-    
-    Methods:
-    - GET    /api/person/           → Barcha personlarni olish (List/Read All)
-    - GET    /api/person/<id>/      → Bitta personni olish (Read One)
-    - POST   /api/person/           → Yangi person yaratish (Create)
-    - PUT    /api/person/<id>/      → Person yangilash (Update - to'liq)
-    - PATCH  /api/person/<id>/      → Person qisman yangilash (Update - partial)
-    - DELETE /api/person/<id>/      → Person o'chirish (Delete)
+
+    Endpoint: POST /api/person/
+
+    Operatsiya "action" field orqali aniqlanadi:
+    - action: "list"   → Barcha personlarni olish
+    - action: "get"    → Bitta personni olish (id kerak)
+    - action: "create" → Yangi person yaratish
+    - action: "update" → Person yangilash (id kerak)
+    - action: "delete" → Person o'chirish (id kerak)
+
+    Request Body:
+    {
+        "action": "list|get|create|update|delete",
+        "id": 127,  // get, update, delete uchun kerak
+        "data": {}, // create, update uchun
+        "limit": 50,    // list uchun
+        "offset": 0,    // list uchun
+        "search": ""    // list uchun
+    }
     """
     from .models import Person
-    import json
-    from datetime import datetime, date
-    from django.core.files.base import ContentFile
-    import base64
-    import os
 
     try:
-        # ==================== READ ALL (GET without ID) ====================
-        if request.method == 'GET' and person_id is None:
-            # Query parameters
-            limit = int(request.GET.get('limit', 50))
-            offset = int(request.GET.get('offset', 0))
-            search = request.GET.get('search', '').strip()
+        # Parse request
+        if request.method == 'POST':
+            try:
+                body = json.loads(request.body)
+            except Exception as e:
+                return JsonResponse({
+                    'success': False,
+                    'error': f'JSON parse xatosi: {str(e)}',
+                    'received_body': request.body.decode('utf-8')[:200]
+                }, status=400)
+        elif request.method == 'GET':
+            # GET method uchun query params
+            action = request.GET.get('action', '').lower()
+            if not action:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'action parametri kerak (list, get, create, update, delete)',
+                    'method': request.method
+                }, status=400)
+            body = {
+                'action': action,
+                'id': request.GET.get('id'),
+                'limit': request.GET.get('limit', 50),
+                'offset': request.GET.get('offset', 0),
+                'search': request.GET.get('search', '')
+            }
+        else:
+            return JsonResponse({
+                'success': False,
+                'error': f'Faqat POST yoki GET metodlari qo\'llab-quvvatlanadi. Sizniki: {request.method}'
+            }, status=405)
+
+        action = body.get('action', '').lower()
+        if not action:
+            return JsonResponse({
+                'success': False,
+                'error': 'action maydoni bo\'sh. Foydalanish mumkin: list, get, create, update, delete',
+                'received_body': body
+            }, status=400)
+        
+        person_id = body.get('id')
+        print(f"\n🔔 Person CRUD API chaqirildi - action: {action}, id: {person_id}")
+        data = body.get('data', {})
+
+        # ==================== LIST - Barcha personlar ====================
+        if action == 'list':
+            limit = int(body.get('limit', 50))
+            offset = int(body.get('offset', 0))
+            search = body.get('search', '').strip()
 
             # Base query
             persons = Person.objects.all()
@@ -1483,14 +1905,21 @@ def person_crud_api(request, person_id=None):
 
             return JsonResponse({
                 'success': True,
+                'action': 'list',
                 'total_count': total_count,
                 'limit': limit,
                 'offset': offset,
                 'data': persons_data
             })
 
-        # ==================== READ ONE (GET with ID) ====================
-        elif request.method == 'GET' and person_id is not None:
+        # ==================== GET - Bitta person ====================
+        elif action == 'get':
+            if not person_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'id maydoni kerak'
+                }, status=400)
+
             try:
                 person = Person.objects.get(id=person_id)
             except Person.DoesNotExist:
@@ -1499,9 +1928,9 @@ def person_crud_api(request, person_id=None):
                     'error': f'Person ID {person_id} topilmadi'
                 }, status=404)
 
-
             return JsonResponse({
                 'success': True,
+                'action': 'get',
                 'data': {
                     'id': person.id,
                     'first_name': person.first_name,
@@ -1525,84 +1954,158 @@ def person_crud_api(request, person_id=None):
                 }
             })
 
-        # ==================== CREATE (POST without ID) ====================
-        elif request.method == 'POST' and person_id is None:
-            data = json.loads(request.body)
+        # ==================== CREATE - Yangi person ====================
+        elif action == 'create':
+            print("📥 CREATE action chaqirildi")
+            print(f"📥 Qabul qilingan data: {data}")
+            
+            try:
+                # Validation
+                if not data.get('first_name') or not data.get('last_name'):
+                    return JsonResponse({
+                        'success': False,
+                        'error': 'first_name va last_name majburiy'
+                    }, status=400)
 
-            # Required fields validation
-            if not data.get('first_name') or not data.get('last_name'):
+                # PINFL unique tekshirish
+                pinfl_value = data.get('pinfl', '').strip()
+                if pinfl_value:
+                    existing_person = Person.objects.filter(pinfl=pinfl_value).first()
+                    if existing_person:
+                        return JsonResponse({
+                            'success': False,
+                            'error': f'Bu PINFL ({pinfl_value}) allaqachon "{existing_person.full_name}" foydalanuvchisiga tegishli'
+                        }, status=400)
+                
+                # PASSPORT unique tekshirish
+                passport_series = data.get('passport_series', '').strip()
+                passport_number = data.get('passport_number', '').strip()
+                if passport_series and passport_number:
+                    existing_person = Person.objects.filter(
+                        passport_series=passport_series,
+                        passport_number=passport_number
+                    ).first()
+                    if existing_person:
+                        return JsonResponse({
+                            'success': False,
+                            'error': f'Bu passport ({passport_series} {passport_number}) allaqachon "{existing_person.full_name}" foydalanuvchisiga tegishli'
+                        }, status=400)
+
+                # Create person object
+                person = Person()
+                person.first_name = data.get('first_name', '').strip()
+                person.last_name = data.get('last_name', '').strip()
+                person.middle_name = data.get('middle_name', '').strip() or None
+                person.passport_series = data.get('passport_series', '').strip() or None
+                person.passport_number = data.get('passport_number', '').strip() or None
+                person.pinfl = pinfl_value or None
+                person.position = data.get('position', '').strip() or None
+                person.district = data.get('district', '').strip() or None
+                person.department = data.get('department', '').strip() or None
+                person.phone_number = data.get('phone_number', '').strip() or None
+                person.mahalla = data.get('mahalla', '').strip() or None
+                person.jeton_series = data.get('jeton_series', '').strip() or None
+
+                # Birth date
+                if data.get('birth_date'):
+                    try:
+                        person.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
+                    except:
+                        return JsonResponse({
+                            'success': False,
+                            'error': 'birth_date formati noto\'g\'ri. Masalan: 1990-01-15'
+                        }, status=400)
+
+                # Photo upload
+                # if data.get('photo'):
+                #     try:
+                #         print("📸 Rasm yuklanmoqda...")
+                #         if ',' in data['photo']:
+                #             header, encoded = data['photo'].split(',', 1)
+                #             # Check if it's base64
+                #             if 'base64' not in header:
+                #                 return JsonResponse({
+                #                     'success': False,
+                #                     'error': 'Rasm base64 formatida emas'
+                #                 }, status=400)
+                #         else:
+                #             encoded = data['photo']
+
+                #         image_bytes = base64.b64decode(encoded)
+                #         # Rasm hajmini tekshirish (max 5MB)
+                #         if len(image_bytes) > 5 * 1024 * 1024:
+                #             return JsonResponse({
+                #                 'success': False,
+                #                 'error': 'Rasm hajmi 5MB dan oshmasligi kerak'
+                #             }, status=400)
+                        
+                #         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                #         filename = f"person_{timestamp}.jpg"
+                #         person.photo.save(filename, ContentFile(image_bytes))
+                #         print(f"✅ Rasm saqlandi: {filename}")
+
+                #         # Face encoding
+                #         try:
+                #             import face_recognition
+                #             image = face_recognition.load_image_file(person.photo.path)
+                #             encodings = face_recognition.face_encodings(image)
+                #             if encodings:
+                #                 person.face_encoding = encodings[0].tolist()
+                #                 print("✅ Yuz encoding qilindi")
+                #             else:
+                #                 print("⚠️ Rasmda yuz aniqlanmadi")
+                #         except Exception as face_error:
+                #             print(f"⚠️ Yuz encoding xatosi: {face_error}")
+                #             # Face encoding xatosi person yaratishga to'sqinlik qilmasin
+                            
+                #     except Exception as e:
+                #         print(f"❌ Rasm yuklash xatosi: {str(e)}")
+                #         return JsonResponse({
+                #             'success': False,
+                #             'error': f'Rasmni yuklashda xatolik: {str(e)}'
+                #         }, status=400)
+
+                try:
+                    person.save()
+                    print(f"✅ Person saqlandi: ID={person.id}, Ism={person.full_name}")
+                except Exception as save_error:
+                    print(f"❌ Saqlash xatosi: {save_error}")
+                    # Rasmni o'chirish agar saqlanmagan bo'lsa
+                    if person.photo and hasattr(person.photo, 'path'):
+                        try:
+                            os.remove(person.photo.path)
+                        except:
+                            pass
+                    raise save_error
+
+                return JsonResponse({
+                    'success': True,
+                    'action': 'create',
+                    'message': f'{person.full_name} muvaffaqiyatli yaratildi',
+                    'data': {
+                        'id': person.id,
+                        'full_name': person.full_name,
+                        'pinfl': person.pinfl,
+                        'passport': f'{person.passport_series} {person.passport_number}'.strip() if person.passport_series else None
+                    }
+                }, status=201)
+                
+            except Exception as e:
+                print(f"❌ Umumiy xato: {str(e)}")
                 return JsonResponse({
                     'success': False,
-                    'error': 'first_name va last_name majburiy'
+                    'error': f'Server xatosi: {str(e)}'
+                }, status=500)
+            
+
+        # ==================== UPDATE - Person yangilash ====================
+        elif action == 'update':
+            if not person_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'id maydoni kerak'
                 }, status=400)
 
-            # Create person
-            person = Person()
-            person.first_name = data.get('first_name', '').strip()
-            person.last_name = data.get('last_name', '').strip()
-            person.middle_name = data.get('middle_name', '').strip() or None
-            person.passport_series = data.get('passport_series', '').strip() or None
-            person.passport_number = data.get('passport_number', '').strip() or None
-            person.pinfl = data.get('pinfl', '').strip() or None
-            person.position = data.get('position', '').strip() or None
-            person.district = data.get('district', '').strip() or None
-            person.department = data.get('department', '').strip() or None
-            person.phone_number = data.get('phone_number', '').strip() or None
-            person.mahalla = data.get('mahalla', '').strip() or None
-            person.jeton_series = data.get('jeton_series', '').strip() or None
-
-            # Birth date parsing
-            if data.get('birth_date'):
-                try:
-                    person.birth_date = datetime.strptime(data['birth_date'], '%Y-%m-%d').date()
-                except:
-                    return JsonResponse({
-                        'success': False,
-                        'error': 'birth_date formati noto\'g\'ri. Masalan: 1990-01-15'
-                    }, status=400)
-
-            # Photo upload (base64)
-            if data.get('photo'):
-                try:
-                    # Decode base64
-                    if ',' in data['photo']:
-                        header, encoded = data['photo'].split(',', 1)
-                    else:
-                        encoded = data['photo']
-
-                    image_bytes = base64.b64decode(encoded)
-
-                    # Save
-                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    filename = f"person_{timestamp}.jpg"
-                    person.photo.save(filename, ContentFile(image_bytes))
-
-                    # Generate face encoding
-                    image = face_recognition.load_image_file(person.photo.path)
-                    encodings = face_recognition.face_encodings(image)
-                    if encodings:
-                        person.face_encoding = encodings[0].tolist()
-
-
-                except Exception as e:
-                    return JsonResponse({
-                        'success': False,
-                        'error': f'Rasmni yuklashda xatolik: {str(e)}'
-                    }, status=400)
-
-            person.save()
-
-            return JsonResponse({
-                'success': True,
-                'message': f'{person.full_name} muvaffaqiyatli yaratildi',
-                'data': {
-                    'id': person.id,
-                    'full_name': person.full_name
-                }
-            }, status=201)
-
-        # ==================== UPDATE (PUT/PATCH with ID) ====================
-        elif request.method in ['PUT', 'PATCH'] and person_id is not None:
             try:
                 person = Person.objects.get(id=person_id)
             except Person.DoesNotExist:
@@ -1611,9 +2114,7 @@ def person_crud_api(request, person_id=None):
                     'error': f'Person ID {person_id} topilmadi'
                 }, status=404)
 
-            data = json.loads(request.body)
-
-            # Update fields (if provided)
+            # Update fields
             if 'first_name' in data:
                 person.first_name = data['first_name'].strip()
             if 'last_name' in data:
@@ -1652,13 +2153,13 @@ def person_crud_api(request, person_id=None):
             # Photo update
             if 'photo' in data and data['photo']:
                 try:
-                    # Delete old photo
+                    # Delete old
                     if person.photo:
                         if os.path.exists(person.photo.path):
                             os.remove(person.photo.path)
                         person.photo.delete(save=False)
 
-                    # Upload new photo
+                    # Upload new
                     if ',' in data['photo']:
                         header, encoded = data['photo'].split(',', 1)
                     else:
@@ -1669,14 +2170,14 @@ def person_crud_api(request, person_id=None):
                     filename = f"person_{person.id}_{timestamp}.jpg"
                     person.photo.save(filename, ContentFile(image_bytes))
 
-                    # Regenerate face encoding
+                    # Regenerate encoding
+                    import face_recognition
                     image = face_recognition.load_image_file(person.photo.path)
                     encodings = face_recognition.face_encodings(image)
                     if encodings:
                         person.face_encoding = encodings[0].tolist()
                     else:
                         person.face_encoding = None
-
 
                 except Exception as e:
                     return JsonResponse({
@@ -1688,6 +2189,7 @@ def person_crud_api(request, person_id=None):
 
             return JsonResponse({
                 'success': True,
+                'action': 'update',
                 'message': f'{person.full_name} muvaffaqiyatli yangilandi',
                 'data': {
                     'id': person.id,
@@ -1695,8 +2197,14 @@ def person_crud_api(request, person_id=None):
                 }
             })
 
-        # ==================== DELETE (DELETE with ID) ====================
-        elif request.method == 'DELETE' and person_id is not None:
+        # ==================== DELETE - Person o'chirish ====================
+        elif action == 'delete':
+            if not person_id:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'id maydoni kerak'
+                }, status=400)
+
             try:
                 person = Person.objects.get(id=person_id)
             except Person.DoesNotExist:
@@ -1707,7 +2215,7 @@ def person_crud_api(request, person_id=None):
 
             full_name = person.full_name
 
-            # Delete photo from disk
+            # Delete photo
             if person.photo:
                 if os.path.exists(person.photo.path):
                     os.remove(person.photo.path)
@@ -1716,15 +2224,19 @@ def person_crud_api(request, person_id=None):
 
             return JsonResponse({
                 'success': True,
+                'action': 'delete',
                 'message': f'{full_name} muvaffaqiyatli o\'chirildi'
             })
 
-        # ==================== METHOD NOT ALLOWED ====================
+        # ==================== INVALID ACTION ====================
         else:
             return JsonResponse({
                 'success': False,
-                'error': 'Method not allowed'
-            }, status=405)
+                'error': 'Noto\'g\'ri action. Foydalanish mumkin: list, get, create, update, delete',
+                'received_action': action,
+                'received_action_type': str(type(action)),
+                'received_body': body
+            }, status=400)
 
     except json.JSONDecodeError:
         return JsonResponse({

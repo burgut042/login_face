@@ -46,6 +46,6 @@ urlpatterns = [
 
         # === PERSON CRUD API ===
     path('api/person/', person_crud_api, name='person-crud-list'),
-    path('api/person/<int:person_id>/', person_crud_api, name='person-crud-detail'),
+    # path('api/person/<int:person_id>/', person_crud_api, name='person-crud-detail'),
 
 ]

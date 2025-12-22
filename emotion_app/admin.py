@@ -16,7 +16,7 @@ class LoginLogInline(admin.TabularInline):
     model = LoginLog
     extra = 0
     readonly_fields = ['login_time', 'login_method', 'login_photo_preview', 'ip_address', 'confidence']
-    fields = ['login_time', 'login_method', 'login_photo_preview', 'confidence', 'ip_address']
+    fields = ['login_time', 'login_method', 'login_photo_preview', 'confidence', 'ip_address'] 
     can_delete = False
     max_num = 10  # Oxirgi 10 ta logni ko'rsatish
 

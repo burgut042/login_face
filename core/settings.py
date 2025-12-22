@@ -21,16 +21,36 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-elr&!0e%d=3*t(=q6a!1$le8nfy!0(q^mf9(^fgu5!*bub!%qp'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
+
+# USE_X_FORWARDED_HOST = True
+# SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 ALLOWED_HOSTS = [
     '192.168.100.36',
-    '25.1.1.129',
+    '10.181.1.114',
     'localhost',
     '127.0.0.1'
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "https://192.168.100.36:8001",
+    "https://192.168.100.36",
+    "https://10.181.1.114",
+    "http://192.168.100.36",
+    "http://localhost",
+    "http://127.0.0.1"
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://192.168.100.36:8001",
+    "https://192.168.100.36",
+    "https://10.181.1.114",
+    "http://192.168.100.36",
+    "http://localhost",
+    "http://127.0.0.1",
+]
 
 # Application definition
 
